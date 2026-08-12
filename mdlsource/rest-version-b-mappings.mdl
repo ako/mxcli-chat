@@ -27,8 +27,13 @@ create constant MxcliChatRest.OpenRouterModel
   COMMENT 'OpenRouter model id. Must support tool calling for the memory tools to work.';
 /
 
-/** Reads the response half of POST /chat/completions. */
-create import mapping MxcliChatRest.IMM_ChatCompletion
+/**
+ * Reads the response half of POST /chat/completions — after TRF_ChatCompletion
+ * has flattened it. Import mappings need no container entity for an array
+ * (unlike export mappings, FINDINGS 48), so a nested `create` per level is all
+ * this takes.
+ */
+create or modify import mapping MxcliChatRest.IMM_ChatCompletion
   with json structure MxcliChatRest.JSON_ChatCompletion
 {
   create MxcliChatRest.CompletionResponse {
@@ -37,9 +42,12 @@ create import mapping MxcliChatRest.IMM_ChatCompletion
     create MxcliChatRest.CompletionChoice_CompletionResponse/MxcliChatRest.CompletionChoice = choices {
       ChoiceIndex = index,
       FinishReason = finish_reason,
-      create MxcliChatRest.CompletionMessage_CompletionChoice/MxcliChatRest.CompletionMessage = message {
-        Role = role,
-        Content = content
+      Role = role,
+      Content = content,
+      create MxcliChatRest.CompletionToolCall_CompletionChoice/MxcliChatRest.CompletionToolCall = tool_calls {
+        CallId = id,
+        ToolName = name,
+        ArgumentsJson = arguments
       }
     }
   }

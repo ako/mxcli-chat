@@ -64,7 +64,7 @@ delete_behavior DELETE_AND_REFERENCES;
  * full surface.
  */
 create json structure MxcliChatRest.JSON_ChatCompletion
-  snippet '{"id":"chatcmpl-1","model":"openai/gpt-oss-20b:free","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Hello."}}]}';
+  snippet '{"id":"chatcmpl-1","model":"openai/gpt-oss-20b:free","choices":[{"index":0,"finish_reason":"stop","role":"assistant","content":"Hello.","tool_calls":[{"id":"call_1","name":"memory_search","arguments":"{}"}]}]}';
 /
 
 /** The request half. */
@@ -72,6 +72,13 @@ create json structure MxcliChatRest.JSON_ChatRequest
   snippet '{"model":"openai/gpt-oss-20b:free","messages":[{"role":"user","content":"Hello."}]}';
 /
 
+/**
+ * The response entities are shaped like the *transformed* response, not the API's.
+ *
+ * TRF_ChatCompletion (see rest-version-b-call.mdl) lifts `choices[].message` up
+ * into the choice and flattens `tool_calls[].function` into the tool call, so
+ * two object levels never need an entity. `Id` is reserved, hence CompletionId.
+ */
 create non-persistent entity MxcliChatRest."CompletionResponse" (
   "CompletionId": string,
   "ModelId": string
@@ -80,13 +87,21 @@ create non-persistent entity MxcliChatRest."CompletionResponse" (
 
 create non-persistent entity MxcliChatRest."CompletionChoice" (
   "ChoiceIndex": integer,
-  "FinishReason": string
+  "FinishReason": string,
+  "Role": string,
+  "Content": string
 );
 /
 
-create non-persistent entity MxcliChatRest."CompletionMessage" (
-  "Role": string,
-  "Content": string
+/**
+ * One tool the model wants called. `ArgumentsJson` is a JSON *string* in the API
+ * itself — the one piece of arbitrary JSON that needs no transformer, because
+ * OpenAI already escaped it.
+ */
+create non-persistent entity MxcliChatRest."CompletionToolCall" (
+  "CallId": string(200),
+  "ToolName": string(200),
+  "ArgumentsJson": string
 );
 /
 
@@ -95,8 +110,8 @@ from MxcliChatRest.CompletionChoice to MxcliChatRest.CompletionResponse
 type reference;
 /
 
-create association MxcliChatRest.CompletionMessage_CompletionChoice
-from MxcliChatRest.CompletionMessage to MxcliChatRest.CompletionChoice
+create association MxcliChatRest.CompletionToolCall_CompletionChoice
+from MxcliChatRest.CompletionToolCall to MxcliChatRest.CompletionChoice
 type reference;
 /
 
