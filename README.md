@@ -29,6 +29,7 @@ Nobody. Single user, no auth.
 | mxcli | built from source, `ako/mxcli` `main` @ `d53691b` |
 | Project file | `MxcliChat.mpr` at the repo root |
 | Database | local PostgreSQL 16, database `mxclichat` |
+| Marketplace content | standalone widgets upgraded to latest 11.13.0-compatible; modules and the Image widget still need Studio Pro — see `FINDINGS.md` |
 
 ## Working on it
 

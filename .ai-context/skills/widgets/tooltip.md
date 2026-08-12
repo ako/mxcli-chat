@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.tooltip.Tooltip`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 1.4.2
+- **Version:** 1.5.1
 
 ## MDL Example
 

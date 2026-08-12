@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.accessibilityhelper.AccessibilityHelper`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 2.2.1
+- **Version:** 2.2.2
 
 ## MDL Example
 

@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.accordion.Accordion`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 2.3.4
+- **Version:** 2.3.5
 
 ## MDL Example
 

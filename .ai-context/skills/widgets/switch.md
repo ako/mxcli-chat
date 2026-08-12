@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.custom.switch.Switch`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 4.2.2
+- **Version:** 4.3.0
 
 ## MDL Example
 

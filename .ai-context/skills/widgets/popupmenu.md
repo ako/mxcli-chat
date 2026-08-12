@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.popupmenu.PopupMenu`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 4.0.2
+- **Version:** 4.3.1
 
 ## MDL Example
 
@@ -25,6 +25,7 @@ PLUGGABLEWIDGET 'com.mendix.widget.web.popupmenu.PopupMenu' widget1 {
 | `basicItems` | object |  |  | The popup menu items. |
 | `customItems` | object |  |  | The popup menu custom items. To make sure the popup closes correctly after a ... |
 | `trigger` | enumeration | Yes | onclick |  |
+| `clickCloseOn` | enumeration | Yes | onClickAnywhere |  |
 | `hoverCloseOn` | enumeration | Yes | onHoverLeave |  |
 | `position` | enumeration | Yes | bottom | The location of the menu relative to the click area. |
 | `clippingStrategy` | enumeration | Yes | absolute | 'Absolute' positions the floating element relative to its nearest positioned ... |

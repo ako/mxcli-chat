@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.custom.badgebutton.BadgeButton`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 3.2.1
+- **Version:** 3.3.0
 
 ## MDL Example
 

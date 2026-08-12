@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.custom.starrating.StarRating`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 3.2.1
+- **Version:** 3.2.2
 
 ## MDL Example
 

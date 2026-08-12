@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.videoplayer.VideoPlayer`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 3.2.3
+- **Version:** 3.2.4
 
 ## MDL Example
 

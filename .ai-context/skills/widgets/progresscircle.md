@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.custom.progresscircle.ProgressCircle`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 3.3.2
+- **Version:** 3.3.3
 
 ## MDL Example
 

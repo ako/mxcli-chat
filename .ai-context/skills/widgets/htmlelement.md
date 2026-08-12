@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.htmlelement.HTMLElement`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 1.2.2
+- **Version:** 1.2.12
 
 ## MDL Example
 

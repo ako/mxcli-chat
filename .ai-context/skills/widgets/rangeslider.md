@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.custom.RangeSlider.RangeSlider`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 2.1.4
+- **Version:** 3.0.3
 
 ## MDL Example
 

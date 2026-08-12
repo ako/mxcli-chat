@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.custom.slider.Slider`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 2.1.4
+- **Version:** 3.0.4
 
 ## MDL Example
 

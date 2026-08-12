@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.languageselector.LanguageSelector`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 1.1.3
+- **Version:** 1.1.4
 
 ## MDL Example
 

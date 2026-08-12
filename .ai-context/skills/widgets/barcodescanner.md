@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.barcodescanner.BarcodeScanner`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 2.5.0
+- **Version:** 2.5.1
 
 ## MDL Example
 
