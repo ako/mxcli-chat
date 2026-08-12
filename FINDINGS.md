@@ -709,3 +709,134 @@ port rather than killing it.
 Good diagnostics, and the reason the stale `config.json` reading above looked
 contradictory at first. **After a boot, check the log says it started — an HTTP
 200 on 8080 only proves *something* is listening.**
+
+---
+
+## 2026-08-12, night — MxcliChatCore and the memory MCP server
+
+The shared half of the app is built and working: a `Memory` entity, four tool
+microflows, and an MCP server publishing them at `/memory/mcp`. Verified with a
+real MCP handshake over curl — `initialize`, `tools/list`, then all four tools
+called and the results checked against the database.
+
+### 35. `autocreateddate` is renamed to the system member `CreatedDate`
+
+`"CapturedAt": autocreateddate` is refused at exec time with a good error:
+
+```
+attribute 'CapturedAt: AutoCreatedDate' is renamed to the fixed system member
+'CreatedDate' on write — the declared name is discarded … This is a Mendix system
+member and cannot be bound in a widget; to store a value a widget can show, use a
+plain attribute (e.g. 'CapturedAt: DateTime') and set it yourself.
+```
+
+Used a plain `datetime` set to `[%CurrentDateTime%]` on create. Worth knowing
+before designing a domain model around named creation timestamps.
+
+There is no `create module if not exists`, so a domain script that creates its own
+module aborts on re-run. `create or modify` covers the entities and enumerations
+inside it; the `create module` line has to be dropped when replaying.
+
+### 36. mxcli cannot call a Java action that has a microflow-typed parameter
+
+This blocked the MCP server outright and is the most useful finding of the session.
+
+`MCPServer.CreateMCPServer` and `MCPServer.AddTool` each take a **microflow-typed**
+parameter — `AuthenticationMicroflow`, `ExecutingMicroflow`. Calling them from MDL
+produces, for every call:
+
+```
+[CE0115] "The arguments that are passed to Java action 'MCPServer.AddTool' do not
+match the expected parameters and need to be refreshed."
+```
+
+`mx check` reports it, and the project does not build.
+
+**Diagnosis** — dump the BSON of MCPServer's own example microflow, which makes the
+same calls, and compare argument value types:
+
+| Parameter | Studio Pro wrote | mxcli writes |
+|---|---|---|
+| `AddTool.Name` | `Microflows$BasicCodeActionParameterValue` | same ✓ |
+| `AddTool.ExecutingMicroflow` | **`Microflows$MicroflowParameterValue`** | `Microflows$BasicCodeActionParameterValue` ✗ |
+| `CreateMCPServer.AuthenticationMicroflow` | **`Microflows$MicroflowParameterValue`** | `Microflows$BasicCodeActionParameterValue` ✗ |
+
+`MicroflowParameterValue` exists in `generated/metamodel` and `modelsdk/gen`, but
+nothing under `mdl/` references it — there is no MDL syntax that emits one. A
+missing argument is a separate, easier trap: leaving out `AddTool.Schema` gives the
+same CE0115, and supplying `Schema = ''` fixes *that* half.
+
+**Workaround** — `mdlsource/core-mcp-java-bridge.mdl`. On the Java side those
+parameters are plain `java.lang.String`; the microflow typing is model-level only.
+So two thin Java actions take strings and call the originals directly:
+
+```java
+return new mcpserver.actions.CreateMCPServer(
+        getContext(), Path, ServerName, Version, ProtocolVersion, AuthenticationMicroflow
+).executeAction();
+```
+
+The registration microflow then stays in MDL, where the tool list belongs. Delete
+the bridge if mxcli learns to emit `MicroflowParameterValue`.
+
+### 37. `mxcli check --references` does not skip forward-referenced Java actions
+
+A script that creates a Java action and then calls it in the same file reports
+`java action not found: MxcliChatCore.JA_McpServer_AddTool (referenced by call java
+action)` — even though the header says references created within the script are
+skipped. `exec` runs it fine and `mx check` is clean afterwards, so it is a
+false negative in the checker, not a real problem. Entities and microflows created
+in the same script *are* skipped correctly.
+
+### 38. The MCP server works, and its tool schemas come from the microflow signatures
+
+`AddTool` with an empty `Schema` derives the JSON schema from the executing
+microflow's parameters. **The microflow parameter names are the tool's contract**
+— renaming one renames what the model sees:
+
+```json
+"memory_search": {"type":"object",
+  "properties":{"Query":{"type":"string"},
+                "MaxResults":{"anyOf":[{"type":"number"},{"type":"string"}]}},
+  "required":["Query","MaxResults"]}
+```
+
+Note **every** parameter comes out `required` — there is no optional-parameter
+concept, so tools need to tolerate zero/empty values. Both search and list take a
+`MaxResults` that falls back to a default when it is 0 or less, for that reason.
+
+Verified end to end over curl against `POST /memory/mcp` (streamable HTTP; the
+response is `text/event-stream`, and the `Mcp-Session-Id` header from `initialize`
+must be echoed on later calls):
+
+```
+add     -> Stored memory #1.  /  Stored memory #2.
+search  -> #1 Andrej prefers the ledger theme. |
+list    -> #2 The app talks to OpenRouter… | #1 Andrej prefers the ledger theme. |
+forget  -> Forgot memory #1.
+list    -> #2 The app talks to OpenRouter… |
+```
+
+and confirmed in the database with `mxcli oql` — including that the enum mapped to
+`Preference` and that forget is a soft delete (`IsActive = false`, row retained).
+Those two rows are left in place as seed data.
+
+### 39. The advertised MCP endpoint is `nullmemory/mcp` on a local run
+
+`CreateMCPServer` builds the server's `Endpoint` as
+`Core.getConfiguration().getApplicationRootUrl() + Path + "/mcp"`, and on a plain
+`run --local` the root URL is null:
+
+```
+MCPServer: CreateMCPServer: MCP Server created with name: 'mxclichat-memory',
+endpoint: 'nullmemory/mcp', and version: 'v2025_03_26'.
+```
+
+Cosmetic here — the request handler is mounted at `memory/` and serving — but a
+client that discovers the server by that attribute would get a broken URL.
+
+Setting `ApplicationRootUrl` in the `Default` configuration did **not** help:
+mxcli only passes it when the app is served behind an external URL (`--hub`), and
+on a local run leaves the runtime to default it, which it does not do. Reverted to
+the stock value. Untested alternative:
+`run --local --runtime-setting ApplicationRootUrl=http://localhost:8080/`.

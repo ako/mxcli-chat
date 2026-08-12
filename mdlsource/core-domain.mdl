@@ -1,0 +1,51 @@
+/**
+ * MxcliChatCore — the shared half of the app.
+ *
+ * Holds Memory and the MCP server that exposes it. Both implementations of the
+ * chat (MxcliChatAgent, on the marketplace stack; MxcliChatRest, on plain REST
+ * and microflows) depend on this module and neither owns it, so the two are
+ * compared against the same tool surface rather than against two different ones.
+ *
+ * Re-running this on a project that already has the module aborts on the first
+ * statement — there is no `create module if not exists`. Drop that line when
+ * replaying the rest.
+ */
+
+create module "MxcliChatCore";
+
+/** How a remembered thing should be treated when it is recalled. */
+create or modify enumeration "MxcliChatCore"."ENUM_MemoryKind" (
+  Fact 'Fact',
+  Preference 'Preference',
+  Instruction 'Instruction'
+);
+/
+
+/**
+ * A fact distilled from a conversation and carried into later ones.
+ *
+ * Deliberately not associated to a chat: the two implementations have different
+ * chat entities, and Core must not depend on either. SourceLabel records where a
+ * memory came from as free text instead.
+ */
+create or modify persistent entity "MxcliChatCore"."Memory" (
+  /** Stable, human-quotable handle — what memory_forget takes. */
+  "MemoryNumber": autonumber default 1,
+  /** The remembered statement itself. */
+  "Content": string(1000) not null,
+  /** Fact, Preference or Instruction. */
+  "Kind": MxcliChatCore.ENUM_MemoryKind default Fact,
+  /** Which implementation or chat captured this, as free text. */
+  "SourceLabel": string(200),
+  /**
+   * Set explicitly, not `autocreateddate`: that is renamed to the fixed system
+   * member CreatedDate on write, which cannot be bound in a widget.
+   */
+  "CapturedAt": datetime,
+  /** Touched every time the memory is returned by a search. */
+  "LastUsedAt": datetime,
+  /** Soft delete — memory_forget deactivates rather than deletes. */
+  "IsActive": boolean default true
+)
+index idx_memory_active ("IsActive");
+/

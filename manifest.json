@@ -1,22 +1,26 @@
 {
   "manifest-version": "1.0.0",
   "package": {
-    "package-id": "6b0d904f-9024-54cb-bc6c-12cf8aed5aff",
-    "name": "OpenAIConnector",
-    "version": "9.1.0",
+    "package-id": "4d54e3ca-16c2-50f1-93dc-3ece848571c8",
+    "name": "MCPServer",
+    "version": "5.1.0",
     "type": "Module",
-    "checksum": "{SHA256}LyNSp4P4s3L0svXoJYCwidY8MjZ1GaTx97wbnVyj5Zs="
+    "checksum": "{SHA256}1uPE869LnWO4cYCdAl6A35LpSIbyXHAcISXahqkvQjw="
   },
   "model-version": "11.12.1",
   "files": [
-    "javasource/openaiconnector/actions/EmbeddingsResponse_PrepareForImportMapping.java",
-    "javasource/openaiconnector/actions/ImageResponse_PrepareForImportMapping.java",
-    "javasource/openaiconnector/actions/RequestMapping_ManipulateJson.java",
-    "javasource/openaiconnector/impl/MxLogger.java",
-    "themesource/openaiconnector/native/design-properties.json",
-    "themesource/openaiconnector/native/main.js",
-    "themesource/openaiconnector/settings.json",
-    "themesource/openaiconnector/web/design-properties.json",
-    "themesource/openaiconnector/web/main.scss"
+    "javasource/mcpserver/actions/AddPrompt.java",
+    "javasource/mcpserver/actions/AddTool.java",
+    "javasource/mcpserver/actions/CreateMCPServer.java",
+    "javasource/mcpserver/impl/McpServerRegistry.java",
+    "javasource/mcpserver/impl/McpServerRequestHandler.java",
+    "javasource/mcpserver/impl/McpSessionManager.java",
+    "javasource/mcpserver/impl/McpTransportHandler.java",
+    "javasource/mcpserver/impl/MxLogger.java",
+    "themesource/mcpserver/native/design-properties.json",
+    "themesource/mcpserver/native/main.js",
+    "themesource/mcpserver/settings.json",
+    "themesource/mcpserver/web/design-properties.json",
+    "themesource/mcpserver/web/main.scss"
   ]
 }
