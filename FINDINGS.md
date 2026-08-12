@@ -594,3 +594,118 @@ as runtime data — enter the OpenRouter key on the `Configuration_Overview` pag
 (module folder `USE_ME/Configuration`, or embed the `Snippet_Configurations`
 snippet) with `Endpoint = https://openrouter.ai/api/v1`, `ApiType = OpenAI` and
 `IsNativeOpenAI = false`.
+
+---
+
+## 2026-08-12, night — the agent-document spike
+
+**Question:** does a `create agent` document authored headlessly with MDL get
+materialised into `AgentCommons` rows by `ASU_AgentEditor` at boot? Finding 21
+left it open.
+
+**Answer: no — and the failure takes the whole app down.** Version A of the
+comparison has to be built on AgentCommons *runtime data*, not on agent-editor
+documents.
+
+### 29. ASU_AgentEditor does see documents in ordinary modules
+
+Finding 21's `0 agents document(s) found in the Mendix Model` was not a bug: the
+four agents in AgentEditorCommons are its own shipped templates and are excluded.
+The moment one agent document existed in a normal module, the log read
+`1 agents document(s) found`. That part of the pipeline works.
+
+### 30. A bad agent document stops the runtime from starting
+
+Not a warning, not a skipped import — the after-startup action throws and the
+runtime refuses to come up:
+
+```
+Agent Editor Commons: AgentEditor_ImportFromStudioPro: Creating/Updating agent
+  documents failed due to bad input.
+Core: After-startup action failed.
+M2EE: Starting Mendix Runtime failed.
+  Caused by: The after-startup-action failed with an exception or returned false.
+```
+
+`mx check` reports **0 errors** on the same project. So an agent document that is
+structurally fine and passes every static check can still make the app unbootable,
+and the only way to find out is to boot it. Keep the project committed before
+adding one.
+
+### 31. Every agent document needs a Model document, and MxCloudGenAI is the only provider
+
+Three variants, each a full boot cycle:
+
+| Agent document | Result |
+|---|---|
+| `model: SpikeModel` (`Provider: MxCloudGenAI`, key constant empty) | `No value could be found for the local configuration for the constant` → model not imported → `Model with name  is referenced but could not be found for the Agent` |
+| No `model:` at all | `No Model document is referenced for the Agent.` — same fatal error |
+| `model: SpikeModel` with `Provider: OpenAI` | `ImportDeployedModel: Model provider is not one of the allowed types for Model document` (a `NullPointerException`) |
+
+The skill warns that `Provider` is free-form and nothing validates it; this is
+what that costs. `Provider: OpenAI` writes, round-trips through `describe model`,
+and passes `mx check` — then the runtime rejects it at boot.
+
+With a *non-empty* dummy key the MxCloudGenAI import got one step further and
+failed at `Key could not be imported` — i.e. it validates against Mendix Cloud.
+**A model document needs a real Mendix Cloud GenAI key**, which is exactly the
+backend this app is not using.
+
+`Model with name  is referenced` (note the blank) also suggests the agent's model
+link is resolved by a name field the portal populates, not by the qualified name
+mxcli writes. Not chased further, since the provider restriction already settles it.
+
+### 32. Consequence for the build: Version A uses AgentCommons data, not documents
+
+`AgentCommons.Agent`'s own documentation says agents "can be created by Agent
+Admins in the UI" — the entity is ordinary data. So the marketplace runtime
+(agents, tools, knowledge bases, MCP services, ConversationalUI, Call Agent
+actions) is fully usable headlessly; only the Studio-Pro-extension *document*
+layer is not. Version A creates its agent as data in a startup microflow.
+
+Spike cleaned up: module, model, agent and constant dropped, `mx check` 0 errors,
+app boots to HTTP 200 with `Successfully ran after-startup-action`.
+
+### 33. CORRECTION to finding 22 — a configuration override never reached the runtime
+
+`alter settings constant 'Encryption.EncryptionKey' value '…' in configuration
+'Default'` **did not work**. mxbuild writes `deployment/model/config.json` with
+each constant's *default* value, and that map is what `mxcli run --local` hands
+the runtime as `MicroflowConstants`. Verified directly:
+
+```
+$ python3 -c "…json.load(open('deployment/model/config.json'))…"
+EncryptionKey = ''          # after the configuration override
+EncryptionKey = '95d6…3bb0' # after setting the constant's DEFAULT
+```
+
+So the app had been running with an **empty encryption key** since finding 22.
+Fixed in `mdlsource/agent-stack-config.mdl` by setting the model-level default.
+
+To be clear about the deployment story: a default is a dev convenience, not the
+per-environment mechanism. Constant values are set on the running app **over the
+M2EE admin port** — `update_configuration`'s `MicroflowConstants` — which is how
+Mendix Cloud injects them per environment and how mxcli passes them at boot.
+
+Caveat if you try that through mxcli: `--runtime-setting` folds entries into the
+boot payload with `params[k] = v`, so
+`--runtime-setting 'MicroflowConstants={…}'` would **replace** the whole map
+rather than merge into it, dropping every other constant. Merging map-valued
+settings would be a useful mxcli improvement.
+
+### 34. mxcli refuses to boot onto an occupied port — and it is right to
+
+Mid-spike a `curl` returned HTTP 200 from a runtime I thought I had just started.
+I hadn't: an earlier `run --local` still held 8080, and the new one had exited with
+
+```
+A stale process is silently adopted otherwise, so edits appear to do nothing
+(looks like a stale cache — it isn't).
+Held by pid 10741: … -Dmendix.running.locally.by.studiopro=true …
+That is not a process mxcli started, so it is not a leftover run — pick another
+port rather than killing it.
+```
+
+Good diagnostics, and the reason the stale `config.json` reading above looked
+contradictory at first. **After a boot, check the log says it started — an HTTP
+200 on 8080 only proves *something* is listening.**
