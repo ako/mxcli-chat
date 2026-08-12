@@ -1,0 +1,59 @@
+/**
+ * Version A's chat page.
+ *
+ * The page is deliberately thin: a data view over the ChatContext and one
+ * snippet call. Everything visible — the message list, the composer, tool-call
+ * rendering, streaming — is ConversationalUI's, which is the whole point of
+ * version A. Structure copied from ConversationalUI_FullScreenChat, including
+ * the two classes that make the chat fill the page.
+ */
+create page MxcliChatAgent.Chat_Agent (
+  Title: 'Chat (agent modules)',
+  Layout: ConversationalUI.Layout_MasterBase,
+  Folder: 'Pages',
+  Params: { $ChatContext: ConversationalUI.ChatContext }
+) {
+  container containerChatPage (Class: 'chat-page--fullheight-centered') {
+    dataview dataViewChat (
+      DataSource: $ChatContext,
+      FormOrientation: Vertical,
+      Class: 'chat-dataview--display-contents'
+    ) {
+      container containerChatCard (Class: 'card chat-container') {
+        snippetcall snippetChat (Snippet: ConversationalUI.Snippet_ChatContext_ConversationalUI)
+      }
+    }
+  }
+}
+/
+
+/**
+ * Opens a new chat against the seeded agent.
+ *
+ * ChatContext_Create_ForAgent resolves the agent's in-use version, its deployed
+ * model and its tools — including the memory MCP server — so nothing about the
+ * model or the tool list is repeated here.
+ *
+ * The action microflow is AgentCommons' own: it is what runs when the send
+ * button is clicked, and it does the request/response/tool-call loop that
+ * version B will have to write by hand.
+ */
+create microflow MxcliChatAgent.ACT_Chat_Open ()
+folder 'Pages'
+begin
+  retrieve $Agent from AgentCommons.Agent
+    where Title = 'MxcliChat Assistant'
+    limit 1;
+
+  $ChatContext = call java action AgentCommons.ChatContext_Create_ForAgent (
+    Agent = $Agent,
+    ActionMicroflow = 'AgentCommons.ChatContext_ChatWithHistory_ActionMicroflow_AgentBuilder',
+    ContextObject = empty,
+    OverwritingDeployedModel = empty
+  );
+
+  show page MxcliChatAgent.Chat_Agent ($ChatContext = $ChatContext);
+
+  return;
+end;
+/

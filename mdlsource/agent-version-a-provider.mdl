@@ -1,0 +1,80 @@
+/**
+ * Picking the right action microflow for the chat.
+ *
+ * The first attempt passed AgentCommons.ChatContext_ChatWithHistory_ActionMicroflow_AgentBuilder,
+ * which looks like the obvious choice by name and is not. It is the Agent
+ * Builder's *test* chat: it starts from
+ * `$ChatContext/AgentCommons.PageHelper_ChatContext`, and a chat opened outside
+ * that UI has no PageHelper. So it found no deployed model, took the else
+ * branch, and tried to show validation feedback on an object that is not on the
+ * page — which threw:
+ *
+ *   ConversationalUI: ProviderConfig_ExecuteAction: Cannot invoke
+ *   "IMendixIdentifier.toLong()" because "validationObjectId" is null
+ *     at AgentCommons.ChatContext_ChatWithHistory_ActionMicroflow_AgentBuilder
+ *       (AddValidationFeedback : 'Show validation message on member
+ *        Version_DeployedModel of Version')
+ *
+ * The user saw an assistant bubble reading "Error", with nothing about the real
+ * cause. Worth remembering: a null-object validation-feedback activity surfaces
+ * as a generic runtime error, not as a validation message.
+ *
+ * ConversationalUI.ChatContext_ChatWithHistory_ActionMicroflow_Agent is the one
+ * meant for this path. Its own annotation says so: "If the ChatContext was
+ * created via the 'New Chat for Agent (Runtime)' action, the agent can be
+ * retrieved and used to be executed for the chat."
+ *
+ * ChatContext_Create_ForAgent creates the ProviderConfig itself and stamps this
+ * name onto it, so nothing else has to be seeded.
+ */
+
+drop microflow MxcliChatAgent.SUB_Seed_ProviderConfig;
+
+/**
+ * Seeds everything version A needs, if it is not already there.
+ *
+ * Called from MxcliChatCore.ASU_MxcliChat at startup.
+ *
+ * @returns true once the agent is ready
+ */
+create or modify microflow MxcliChatAgent.ASU_AgentSetup ()
+returns boolean as $Ready
+folder 'Seed'
+begin
+  $Configuration = call microflow MxcliChatAgent.SUB_Seed_Configuration ();
+  $DeployedModel = call microflow MxcliChatAgent.SUB_Seed_DeployedModel (
+    Configuration = $Configuration
+  );
+  $Service = call microflow MxcliChatAgent.SUB_Seed_McpService ();
+  $Agent = call microflow MxcliChatAgent.SUB_Seed_Agent (
+    DeployedModel = $DeployedModel
+  );
+  return true;
+end;
+/
+
+/**
+ * Opens a new chat against the seeded agent.
+ *
+ * ChatContext_Create_ForAgent resolves the agent's in-use version, its deployed
+ * model and its tools — including the memory MCP server — and creates the
+ * provider config the chat dispatches through. Nothing about the model or the
+ * tool list is repeated here.
+ */
+create or modify microflow MxcliChatAgent.ACT_Chat_Open ()
+folder 'Pages'
+begin
+  retrieve $Agent from AgentCommons.Agent
+    where Title = 'MxcliChat Assistant'
+    limit 1;
+
+  $ChatContext = call java action MxcliChatAgent.JA_ChatContext_CreateForAgent (
+    Agent = $Agent,
+    ActionMicroflow = 'ConversationalUI.ChatContext_ChatWithHistory_ActionMicroflow_Agent'
+  );
+
+  show page MxcliChatAgent.Chat_Agent ($ChatContext = $ChatContext);
+
+  return;
+end;
+/

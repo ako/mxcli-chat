@@ -881,3 +881,90 @@ worse than it sounds:
 
 Clean sequence: `for p in $(pgrep -f "mendix.running.locally"); do kill $p; done`,
 then the same for `modeler/mxbuild`, then confirm port 8080 answers `000`.
+
+---
+
+## 2026-08-12, late — version A's chat page
+
+The page is built and the whole chain runs. It stops at the last hop, for an
+environment reason rather than a modelling one.
+
+### 42. `ChatContext_Create_ForAgent` hits the microflow-typed-parameter wall too
+
+Second independent module, same CE0115 as finding 36:
+`AgentCommons.ChatContext_Create_ForAgent.ActionMicroflow` is microflow-typed, so
+calling it from MDL fails to build. Same fix — `JA_ChatContext_CreateForAgent`
+takes a string and calls the Java constructor, which declares it as
+`java.lang.String`.
+
+Two modules in one session means this is not an MCP Server quirk. Teaching mxcli
+to emit `Microflows$MicroflowParameterValue` would remove both bridges.
+
+### 43. `..._ActionMicroflow_AgentBuilder` is the Agent Builder's *test* chat
+
+The obvious-looking choice by name is wrong.
+`AgentCommons.ChatContext_ChatWithHistory_ActionMicroflow_AgentBuilder` starts
+from `$ChatContext/AgentCommons.PageHelper_ChatContext`, which only exists for a
+chat opened inside the Agent Builder UI. From anywhere else the PageHelper is
+empty, so it finds no deployed model and falls into a branch that shows
+validation feedback on an object that is not on the page:
+
+```
+ConversationalUI: ProviderConfig_ExecuteAction: Cannot invoke
+"IMendixIdentifier.toLong()" because "validationObjectId" is null
+  at AgentCommons.ChatContext_ChatWithHistory_ActionMicroflow_AgentBuilder
+    (AddValidationFeedback : 'Show validation message on member
+     Version_DeployedModel of Version')
+```
+
+**A validation-feedback activity on a null object surfaces as a generic runtime
+error, not as a validation message** — the user sees an assistant bubble reading
+just "Error". The database was fine: `Version_DeployedModel` was correctly linked,
+verified by OQL, which is what made the message so misleading.
+
+The right one is `ConversationalUI.ChatContext_ChatWithHistory_ActionMicroflow_Agent`,
+whose own annotation says it: *"If the ChatContext was created via the 'New Chat
+for Agent (Runtime)' action, the agent can be retrieved and used."* With that
+name passed in, `ChatContext_Create_ForAgent` creates the ProviderConfig itself —
+nothing else needs seeding.
+
+**Read the action microflow before wiring it.** The name is not the contract; the
+first activity is.
+
+### 44. The runtime cannot reach OpenRouter from this container — DNS, not credentials
+
+With the chain correct, sending a message now fails at the last hop:
+
+```
+OpenAI connector: An error occurred in the REST call for operation Chat Completions.
+Microflow: Request_POST
+HttpStatus : 503
+Content: DNS resolution failure
+```
+
+That is the *whole* chain working — page → ChatContext → provider config → action
+microflow → agent → GenAI Commons → OpenAI Connector → REST. It dies on the
+outbound call.
+
+`curl https://openrouter.ai/api/v1/models` from the shell works, because the shell
+honours this environment's egress proxy. The Mendix runtime does not: its REST
+call uses Apache HttpClient, which ignores the JVM's `http.proxyHost` properties
+unless explicitly configured, so the hostname never resolves.
+
+**A real API key will not fix this on its own** in a proxied cloud container. Two
+things are needed to see the agent actually answer: the key on
+`OpenAIConnector.Configuration_Overview`, and outbound access for the runtime
+JVM — a local run on an unproxied machine, or proxy configuration passed to the
+runtime.
+
+### 45. Browser verification without playwright-cli
+
+`mxcli playwright verify` needs a `playwright-cli` binary that is not installed
+here, but Playwright's browsers are: `/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell`
+(the path in `.playwright/cli.config.json`, `/usr/local/bin/mx-headless-shell`,
+does not exist in this image). `npm i playwright-core` plus a 20-line script
+drives the app fine.
+
+One Atlas detail: at 1280×900 the navigation sidebar is collapsed, so menu items
+are in the DOM but not visible and `click()` times out. `dispatchEvent('click')`
+on `a[title="…"]` gets through.
