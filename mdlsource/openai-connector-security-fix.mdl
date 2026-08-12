@@ -1,0 +1,42 @@
+/**
+ * Clears CE0066 "Entity access is out of date" on OpenAIConnector's domain model.
+ *
+ * `mxcli marketplace install 220472` (OpenAI Connector 9.1.0 — 9.0.0 too) leaves
+ * the module's domain model with that error, and it blocks the build, not just
+ * `mx check`. Studio Pro's "Update security" button is the interactive fix.
+ *
+ * Two things that did NOT work, in case someone tries them again:
+ *
+ *   1. Re-issuing the grants in place. mxcli's GRANT adds and modifies member
+ *      entries but never removes one, so a stale entry survives the rewrite.
+ *   2. REVOKE followed by a fresh GRANT. The rules mxcli then builds trigger
+ *      CE0066 by themselves — verified by revoking the six Administrator rules
+ *      (error persisted against mxcli-authored User rules) and then the four
+ *      User rules (error cleared). Every one of these entities specializes a
+ *      GenAICommons entity, and mxcli's rule builder lists inherited members;
+ *      Mendix appears not to accept that here.
+ *
+ * So this removes OpenAIConnector's ten entity access rules and does not put
+ * them back. The two module roles themselves survive, along with their page and
+ * microflow access.
+ *
+ * WHAT THIS COSTS: nothing while project security is OFF, which is this app's
+ * setting — entity access rules are not enforced at that level. The moment
+ * security is raised to Prototype or Production, OpenAIConnector's entity access
+ * has to be restored in Studio Pro ("Update security" in its domain model), or
+ * its admin pages will show empty data.
+ *
+ * Not idempotent: a second run errors on rules that are already gone.
+ */
+
+revoke OpenAIConnector.Administrator on OpenAIConnector."ApiKey";
+revoke OpenAIConnector.Administrator on OpenAIConnector."AzureAISearchResource";
+revoke OpenAIConnector.Administrator on OpenAIConnector."Configuration";
+revoke OpenAIConnector.Administrator on OpenAIConnector."ConfigurationTest";
+revoke OpenAIConnector.Administrator on OpenAIConnector."Index";
+revoke OpenAIConnector.Administrator on OpenAIConnector."OpenAIDeployedModel";
+
+revoke OpenAIConnector.User on OpenAIConnector."AzureAISearchResource";
+revoke OpenAIConnector.User on OpenAIConnector."Configuration";
+revoke OpenAIConnector.User on OpenAIConnector."Index";
+revoke OpenAIConnector.User on OpenAIConnector."OpenAIDeployedModel";

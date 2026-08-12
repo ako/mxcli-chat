@@ -491,3 +491,106 @@ The skill's suggested retrieve —
 AgentCommons 4.2.0. The entity has `Title`, `UUID`, `AgentOwner`, `UsageType`,
 `Entity` and `ModelDocumentID`. `ModelDocumentID` is the field that carries the
 Studio-Pro document identity; match on that or on `Title`.
+
+---
+
+## 2026-08-12, evening — OpenRouter as the LLM backend
+
+Decision: talk to OpenRouter through Mendix's **OpenAI Connector** (content id
+220472, **9.1.0**) rather than MxGenAIConnector, which is Mendix Cloud only.
+OpenRouter speaks the OpenAI chat-completions API, and the connector is built for
+that — `OpenAIConnector.Configuration` carries an `Endpoint` (*"for example,
+https://api.openai.com/v1"*) and an `IsNativeOpenAI` boolean documented as
+*"For similar APIs such as Mistral, it should be set to false."*
+
+### 24. Installing the OpenAI Connector breaks the build with CE0066
+
+Straight after `marketplace install 220472`, before any `fix` command:
+
+```
+[error] [CE0066] "Entity access is out of date. Please update security by clicking
+the 'Update security' button in the domain model editor." at Domain model of
+module 'OpenAIConnector'
+```
+
+This is not cosmetic — `mxbuild --serve` refuses: *"The project cannot be
+deployed, because it contains errors."*
+
+**Verified it is the package, not mxcli's repair steps:** installed into a clean
+`git worktree` of the previous commit and checked before running `fix widgets` or
+`fix design-properties` — CE0066 was already there. Version **9.0.0** does it too.
+
+### 25. Neither re-granting nor revoke-then-grant fixes it — the rules have to go
+
+Three attempts, in order:
+
+1. **Re-issue the grants in place** (dump them with `describe`, feed them back
+   through `exec`). No effect. mxcli's `GRANT` adds and modifies member entries
+   but never removes one, so whatever is stale survives.
+2. **`REVOKE` then `GRANT` fresh.** Also no effect — and this is the informative
+   one. Revoking the six `Administrator` rules left the error standing against
+   mxcli-authored `User` rules; revoking those four cleared it. So the rules
+   *mxcli builds* trigger CE0066 by themselves. Every entity involved specializes
+   a GenAICommons entity, and mxcli's rule builder lists inherited members.
+3. **`DROP MODULE ROLE`** on both roles clears it, but takes the roles' page and
+   microflow access with them.
+
+Settled on removing the ten entity access rules and keeping both module roles —
+`mdlsource/openai-connector-security-fix.mdl`. Costs nothing at security level
+**OFF**, which is this app's setting, because entity access rules are not
+enforced there. **Raising security to Prototype or Production means restoring
+OpenAIConnector's entity access in Studio Pro first.**
+
+**Verified:** `mx check` 0 errors, and the app boots to HTTP 200 with the
+connector installed.
+
+### 26. mxcli's GRANT validator does not see inherited associations
+
+```
+Error: entity OpenAIConnector.OpenAIDeployedModel has no member(s)
+DeployedModel_InputModality; grant only names members of the entity or of an
+entity it inherits from
+```
+
+It does inherit it. `OpenAIConnector.OpenAIDeployedModel extends
+GenAICommons.DeployedModel`, and `GenAICommons.DeployedModel_InputModality` is a
+ReferenceSet whose FROM side is `GenAICommons.DeployedModel`. Inherited
+*attributes* resolve; this inherited *association* does not. It made the module's
+own shipped rule impossible to re-express in MDL.
+
+### 27. `mx check` and the build disagree about how much is wrong
+
+`mx check` reported 1 error. The build's JSON reported eight more diagnostics —
+all **warnings**, and worth reading once:
+
+- `CE4271` — *"Version '6.0.0' of the module 'NanoflowCommons' is not compatible
+  with this Mendix version"*. That is finding 15's stuck module, and Mendix
+  agrees it is stale.
+- `CE0582` — a static image widget "not supported in React client".
+- `CE0635` ×6 — building blocks and page templates referencing other documents.
+
+Note the codes: `CE0582` and `CE0635` carry the `CE` (error) prefix while being
+reported at **Warning** severity. Count severities, not prefixes.
+
+### 28. OpenRouter's free tier: 16 models, 15 with tool calling
+
+From `https://openrouter.ai/api/v1/models` (no auth needed), filtering
+`id.endsWith(':free')` and checking `supported_parameters` for `tools` — which
+matters here, because MCP tool use needs it:
+
+| Model | Tools | Context |
+|---|---|---|
+| `nvidia/nemotron-3.5-lightning:free` | yes | 1,000,000 |
+| `nvidia/nemotron-3-ultra-550b-a55b:free` | yes | 1,000,000 |
+| `nvidia/nemotron-3-super-120b-a12b:free` | yes | 262,144 |
+| `google/gemma-4-31b-it:free` | yes | 262,144 (text+image+video) |
+| `openai/gpt-oss-20b:free` | yes | 131,072 |
+| `nvidia/nemotron-3.5-content-safety:free` | **no** | 128,000 |
+
+Free-tier membership churns, so re-run the query rather than trusting this table.
+
+**The API key does not belong in this repo.** The connector stores configurations
+as runtime data — enter the OpenRouter key on the `Configuration_Overview` page
+(module folder `USE_ME/Configuration`, or embed the `Snippet_Configurations`
+snippet) with `Endpoint = https://openrouter.ai/api/v1`, `ApiType = OpenAI` and
+`IsNativeOpenAI = false`.

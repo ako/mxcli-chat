@@ -46,6 +46,31 @@ it materialises the model's agent documents into runtime rows at boot.
 `Encryption.EncryptionKey` is set in the `Default` configuration to a **development
 key that is committed to this repo**. Override it per environment before deploying.
 
+## LLM backend: OpenRouter
+
+The app talks to OpenRouter through the Mendix **OpenAI Connector** (9.1.0), which
+works against any OpenAI-compatible endpoint. Configure it in the running app on
+`OpenAIConnector.Configuration_Overview`:
+
+| Field | Value |
+|---|---|
+| Endpoint | `https://openrouter.ai/api/v1` |
+| API type | OpenAI |
+| Is native OpenAI | **false** |
+| API key | your OpenRouter key — **entered in the app, never committed** |
+
+Then add a deployed model whose name is an OpenRouter model id. Free models carry
+a `:free` suffix; MCP tool use needs one that supports tool calling — list them with
+
+```bash
+curl -s https://openrouter.ai/api/v1/models | \
+  jq -r '.data[] | select(.id|endswith(":free"))
+         | select(.supported_parameters|index("tools")) | .id'
+```
+
+Installing the connector needs `mdlsource/openai-connector-security-fix.mdl` run
+once afterwards — see finding 25 in `FINDINGS.md` for why, and what it costs.
+
 ## Working on it
 
 The `mxcli` binary is git-ignored (~86 MB). `.claude/bootstrap-mxcli.sh` rebuilds it

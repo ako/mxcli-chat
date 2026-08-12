@@ -1,28 +1,22 @@
 {
   "manifest-version": "1.0.0",
   "package": {
-    "package-id": "b8c0e106-dd01-5368-80e3-3652c4ba2341",
-    "name": "AgentEditorCommons",
-    "version": "2.2.1",
+    "package-id": "6b0d904f-9024-54cb-bc6c-12cf8aed5aff",
+    "name": "OpenAIConnector",
+    "version": "9.1.0",
     "type": "Module",
-    "checksum": "{SHA256}T3Qk84asmX94IqTIg7gNN3btL2XSNYFTmeBF/9qZgec="
+    "checksum": "{SHA256}LyNSp4P4s3L0svXoJYCwidY8MjZ1GaTx97wbnVyj5Zs="
   },
-  "model-version": "11.12.2",
+  "model-version": "11.12.1",
   "files": [
-    "javasource/agenteditorcommons/actions/Agent_CallDocument_WithHistory.java",
-    "javasource/agenteditorcommons/actions/Agent_CallDocument_WithoutHistory.java",
-    "javasource/agenteditorcommons/actions/AgentEditor_ImportFromStudioPro.java",
-    "javasource/agenteditorcommons/actions/ChatContext_Create_ForAgentDocument.java",
-    "javasource/agenteditorcommons/actions/ImportConsumedKnowledgeBase.java",
-    "javasource/agenteditorcommons/actions/ImportDeployedModel.java",
-    "javasource/agenteditorcommons/impl/AgentDocumentUtils.java",
-    "javasource/agenteditorcommons/impl/AgentEditorSyncServlet.java",
-    "javasource/agenteditorcommons/impl/AgentEditorTestServlet.java",
-    "javasource/agenteditorcommons/impl/MxLogger.java",
-    "themesource/agenteditorcommons/native/design-properties.json",
-    "themesource/agenteditorcommons/native/main.js",
-    "themesource/agenteditorcommons/settings.json",
-    "themesource/agenteditorcommons/web/design-properties.json",
-    "themesource/agenteditorcommons/web/main.scss"
+    "javasource/openaiconnector/actions/EmbeddingsResponse_PrepareForImportMapping.java",
+    "javasource/openaiconnector/actions/ImageResponse_PrepareForImportMapping.java",
+    "javasource/openaiconnector/actions/RequestMapping_ManipulateJson.java",
+    "javasource/openaiconnector/impl/MxLogger.java",
+    "themesource/openaiconnector/native/design-properties.json",
+    "themesource/openaiconnector/native/main.js",
+    "themesource/openaiconnector/settings.json",
+    "themesource/openaiconnector/web/design-properties.json",
+    "themesource/openaiconnector/web/main.scss"
   ]
 }
