@@ -96,3 +96,26 @@ For project validation, use the `mx` binary directly rather than `mxcli docker c
 
 It is a flag: `./mxcli --version`. `./mxcli version` exits non-zero with
 `unknown command "version"`.
+
+### 6. Hub preview rejected the environment's `MXCLI_HUB_KEY` (HTTP 401)
+
+`MXCLI_HUB_KEY` is set on this environment, but
+`./mxcli run --hub https://hub.mxcli.org -p MxcliChat.mpr` reported:
+
+```
+Warning: hub registration failed (hub registration failed (HTTP 401):
+missing or invalid X-Hub-Key (run 'mxcli auth hub login') or X-Hub-Secret);
+continuing local-only — the app runs on localhost but has no public preview URL.
+```
+
+Degrades gracefully — the app still boots locally on :8080 — but there is no
+public preview URL from this cloud session. Either the key is stale or
+`mxcli auth hub login` has to be run for this account. Not chased further.
+
+**Verified:** `curl http://localhost:8080/` → `HTTP 200` under both `--local`
+and `--hub`, so only the tunnel is affected.
+
+### 7. `--hub` boots its own runtime — stop the local run first
+
+`--hub` implies `--local`, so it starts a *second* runtime rather than tunnelling
+the one already up. Two runs both want :8080. Stop the first, or pass `--app-port`.
