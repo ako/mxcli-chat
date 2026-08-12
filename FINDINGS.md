@@ -368,3 +368,126 @@ every other widget in the project ships as a `.mpk` only.
 Every module and widget is on its latest 11.13.0-compatible version except
 **NanoflowCommons 6.0.0** (finding 15). `mx check`: **0 errors**.
 `./mxcli run --local`: **HTTP 200**.
+
+---
+
+## 2026-08-12, later still — installing the agent-editor stack
+
+`.ai-context/skills/agents.md` lists seven modules as the prerequisite for the
+`create agent` / `create model` / `create knowledge base` /
+`create consumed mcp service` document types. Installed, plus three things the
+skill does not mention. `mx check`: **0 errors**. App boots: **HTTP 200**.
+
+### 19. The stack is seven modules **plus CommunityCommons plus two widgets**
+
+| Content | id | Version |
+|---|---|---|
+| Encryption | 1011 | 11.1.1 |
+| GenAI Commons | 239448 | 7.2.0 |
+| Mendix Cloud GenAI Connector | 239449 | 7.2.0 |
+| MCP Client | 244893 | 4.1.1 |
+| Conversational UI | 239450 | 7.2.0 |
+| Agent Commons | 240371 | 4.2.0 |
+| Agent Editor | 257918 | 2.2.1 |
+| **Community Commons** | 170 | 11.5.1 |
+| **Markdown viewer** (widget) | 230248 | 1.0.3 |
+| **Events** (widget) | 224259 | 1.3.1 |
+
+The last three are transitive dependencies that `marketplace install` does not
+resolve — it imports exactly the module you name. They surface only as `mx check`
+errors afterwards, and the error text does not say which module wanted them:
+
+- Without CommunityCommons: **48 × CE1613**, e.g. *"The selected Java action
+  'CommunityCommons.RandomHash' no longer exists"* — mostly from Encryption.
+- Without the two widgets: **22 × CE0462** *"Could not find widget 'Markdown
+  viewer' in the 'widgets' directory"* / `'Events'` — from Conversational UI.
+
+Install order that worked (dependency-first): Encryption → GenAICommons →
+MxGenAIConnector → MCPClient → ConversationalUI → AgentCommons →
+AgentEditorCommons → CommunityCommons → the two widgets.
+
+**Read the error code, not the count.** CE1613 is "referenced element gone"
+(missing module) and CE0462 is "widget package absent" — both mean *a dependency
+is missing*, not *the install failed*. Run `mxcli fix widgets` and
+`mxcli fix design-properties` after each batch before believing a count: the
+first pass here renamed 154 design properties across 42 documents.
+
+### 20. `sync-java-deps` reports dependencies as missing when they are not
+
+`./mxcli sync-java-deps -p MxcliChat.mpr` ends with:
+
+```
+sync finished but 4 dependency/dependencies are still missing from vendorlib/:
+  [commons-io:commons-io:2.17.0
+   com.fasterxml.jackson.core:jackson-databind:[2.21.2,3) ×3]
+```
+
+Both are false. Gradle resolved `commons-io` 2.17.0 and 2.21.0 to the higher
+**2.21.0**, and the `[2.21.2,3)` range to **2.22.1** — both jars are in
+`vendorlib/`. The post-check compares declared coordinates to filenames by exact
+version string, so a version *range* can never match and a conflict-resolved
+version looks absent.
+
+The same output also shows a Gradle-snippet parsing bug — the exclusions inside
+`io.modelcontextprotocol.sdk:mcp:2.0.0` are being read as dependency coordinates:
+
+```
+  io.modelcontextprotocol.sdk:mcp:2.0.0'){
+  exclude group: 'com.networknt', module: 'json-schema-validator'
+```
+
+Harmless (Gradle gets the real file), but the report is wrong. **Verified** the
+sync actually worked: `mcp-2.0.0.jar`, `mcp-core-2.0.0.jar`,
+`mcp-json-jackson2-2.0.0.jar`, `okhttp-sse-4.12.0.jar` and 38 others are in
+`vendorlib/`, and the app boots.
+
+### 21. Wiring `ASU_AgentEditor` — and the one after-startup slot
+
+Mendix allows exactly **one** after-startup microflow, and two installed modules
+ship one:
+
+- `AgentEditorCommons.ASU_AgentEditor` — **required**; materialises the model's
+  agent-editor documents into `AgentCommons.*` rows at boot.
+- `AgentCommons.ASU_AgentTemplates_Create` — optional template seeder, **not
+  wired**. When this app gets its own module, both need chaining from a single
+  project-level startup microflow.
+
+Set via `mdlsource/agent-stack-config.mdl`. **Verified in the runtime log** —
+it runs, and registers two dev servlets:
+
+```
+Core: Running after-startup-action...
+Agent Editor Commons: AgentEditor_ImportFromStudioPro: Starting ASU_AgentEditor.
+M2EE: Added servlet at '/dev/preview_agent_test'
+M2EE: Added servlet at '/dev/preview_agent_sync'
+Agent Editor Commons: AgentEditor_ImportFromStudioPro: Finished ASU_AgentEditor.
+Core: Successfully ran after-startup-action.
+```
+
+**Open question for the next session.** The same log says `0 agents document(s)
+found in the Mendix Model`, while `mxcli -c "LIST AGENTS"` reports **4** in
+AgentEditorCommons (TranslationAgent, ProductDescription, SummarizationAgent,
+InformationExtractorAgent) and `AgentCommons.Agent` has 0 rows. Those four are
+the shipped templates, so the ASU may be skipping its own module deliberately —
+but it means **the import path is unproven**. Author one `create agent` in the
+app's own module and re-check the log line and the row count before building on
+it.
+
+### 22. Encryption needs a 32-character key or the stack fails at runtime
+
+`Encryption.EncryptionKey` ships empty, and models/knowledge bases reference it to
+store provider credentials. Set as a `Default`-configuration override, not a model
+default. Exactly 32 characters — `openssl rand -hex 16` gives that; piping
+`openssl rand -base64 24` through `tr -dc 'A-Za-z0-9'` gave 31 and would have
+failed at runtime, not at check time.
+
+**The committed key is a development value.** It is in git, so treat it as public
+and override it per environment before this app is deployed anywhere real.
+
+### 23. `AgentCommons.Agent` has no `QualifiedName` attribute
+
+The skill's suggested retrieve —
+`where AgentCommons.Agent/QualifiedName = 'Module.MyAgent'` — does not work on
+AgentCommons 4.2.0. The entity has `Title`, `UUID`, `AgentOwner`, `UsageType`,
+`Entity` and `ModelDocumentID`. `ModelDocumentID` is the field that carries the
+Studio-Pro document identity; match on that or on `Title`.

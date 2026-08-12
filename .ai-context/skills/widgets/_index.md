@@ -29,17 +29,19 @@ Auto-generated. See individual files for property details, child slots, and obje
 | `PLUGGABLEWIDGET` | ACCORDION | `com.mendix.widget.web.accordion.Accordion` | Accordion | 10 |
 | `PLUGGABLEWIDGET` | BARCODESCANNER | `com.mendix.widget.web.barcodescanner.BarcodeScanner` | Barcode Scanner | 10 |
 | `PLUGGABLEWIDGET` | COMBOBOX | `com.mendix.widget.web.combobox.Combobox` | Combo box | 52 |
-| `PLUGGABLEWIDGET` | DATAGRID | `com.mendix.widget.web.datagrid.Datagrid` | Data grid 2 | 40 |
+| `PLUGGABLEWIDGET` | DATAGRID | `com.mendix.widget.web.datagrid.Datagrid` | Data grid 2 | 56 |
 | `PLUGGABLEWIDGET` | DATAGRIDDATEFILTER | `com.mendix.widget.web.datagriddatefilter.DatagridDateFilter` | Date filter | 16 |
 | `PLUGGABLEWIDGET` | DATAGRIDDROPDOWNFILTER | `com.mendix.widget.web.datagriddropdownfilter.DatagridDropdownFilter` | Drop-down filter | 25 |
 | `PLUGGABLEWIDGET` | DATAGRIDNUMBERFILTER | `com.mendix.widget.web.datagridnumberfilter.DatagridNumberFilter` | Number filter | 12 |
 | `PLUGGABLEWIDGET` | DATAGRIDTEXTFILTER | `com.mendix.widget.web.datagridtextfilter.DatagridTextFilter` | Text filter | 12 |
 | `PLUGGABLEWIDGET` | DROPDOWNSORT | `com.mendix.widget.web.dropdownsort.DropdownSort` | Drop-down sort | 5 |
+| `PLUGGABLEWIDGET` | EVENTS | `com.mendix.widget.web.events.Events` | Events | 13 |
 | `PLUGGABLEWIDGET` | FIELDSET | `com.mendix.widget.web.fieldset.Fieldset` | Fieldset | 2 |
-| `PLUGGABLEWIDGET` | GALLERY | `com.mendix.widget.web.gallery.Gallery` | Gallery | 33 |
+| `PLUGGABLEWIDGET` | GALLERY | `com.mendix.widget.web.gallery.Gallery` | Gallery | 45 |
 | `PLUGGABLEWIDGET` | HTMLELEMENT | `com.mendix.widget.web.htmlelement.HTMLElement` | HTML Element | 12 |
 | `PLUGGABLEWIDGET` | IMAGE | `com.mendix.widget.web.image.Image` | Image | 21 |
 | `PLUGGABLEWIDGET` | LANGUAGESELECTOR | `com.mendix.widget.web.languageselector.LanguageSelector` | Language selector | 6 |
+| `PLUGGABLEWIDGET` | MARKDOWN | `com.mendix.widget.web.markdown.Markdown` | Markdown viewer | 1 |
 | `PLUGGABLEWIDGET` | POPUPMENU | `com.mendix.widget.web.popupmenu.PopupMenu` | Pop-up menu | 10 |
 | `PLUGGABLEWIDGET` | SELECTIONHELPER | `com.mendix.widget.web.selectionhelper.SelectionHelper` | Selection helper | 5 |
 | `PLUGGABLEWIDGET` | TIMELINE | `com.mendix.widget.web.timeline.Timeline` | Timeline | 18 |

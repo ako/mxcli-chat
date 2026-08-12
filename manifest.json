@@ -1,0 +1,28 @@
+{
+  "manifest-version": "1.0.0",
+  "package": {
+    "package-id": "b8c0e106-dd01-5368-80e3-3652c4ba2341",
+    "name": "AgentEditorCommons",
+    "version": "2.2.1",
+    "type": "Module",
+    "checksum": "{SHA256}T3Qk84asmX94IqTIg7gNN3btL2XSNYFTmeBF/9qZgec="
+  },
+  "model-version": "11.12.2",
+  "files": [
+    "javasource/agenteditorcommons/actions/Agent_CallDocument_WithHistory.java",
+    "javasource/agenteditorcommons/actions/Agent_CallDocument_WithoutHistory.java",
+    "javasource/agenteditorcommons/actions/AgentEditor_ImportFromStudioPro.java",
+    "javasource/agenteditorcommons/actions/ChatContext_Create_ForAgentDocument.java",
+    "javasource/agenteditorcommons/actions/ImportConsumedKnowledgeBase.java",
+    "javasource/agenteditorcommons/actions/ImportDeployedModel.java",
+    "javasource/agenteditorcommons/impl/AgentDocumentUtils.java",
+    "javasource/agenteditorcommons/impl/AgentEditorSyncServlet.java",
+    "javasource/agenteditorcommons/impl/AgentEditorTestServlet.java",
+    "javasource/agenteditorcommons/impl/MxLogger.java",
+    "themesource/agenteditorcommons/native/design-properties.json",
+    "themesource/agenteditorcommons/native/main.js",
+    "themesource/agenteditorcommons/settings.json",
+    "themesource/agenteditorcommons/web/design-properties.json",
+    "themesource/agenteditorcommons/web/main.scss"
+  ]
+}

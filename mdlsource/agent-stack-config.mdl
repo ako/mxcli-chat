@@ -1,0 +1,17 @@
+/**
+ * Runtime configuration required by the Mendix agent-editor stack.
+ *
+ * 1. ASU_AgentEditor materialises the agent-editor documents (Agent, Model,
+ *    Knowledge Base, Consumed MCP Service) into AgentCommons entities at boot.
+ *    Without it, 'create agent' documents exist in the model but no
+ *    AgentCommons.Agent rows exist to retrieve at runtime.
+ * 2. The Encryption module needs a 32-character key; models and knowledge bases
+ *    reference it to store provider credentials.
+ *
+ * NOTE: the key below is a development value committed for local convenience.
+ * Replace it per environment before this app is deployed anywhere real.
+ */
+alter settings model AfterStartupMicroflow = 'AgentEditorCommons.ASU_AgentEditor';
+
+alter settings constant 'Encryption.EncryptionKey' value '95d69f1a0e91b95776477d61b5333bb0'
+  in configuration 'Default';

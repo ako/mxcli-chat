@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.barchart.BarChart`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 6.3.0
+- **Version:** 6.3.2
 
 ## MDL Example
 

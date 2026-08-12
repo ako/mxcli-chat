@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.datagriddropdownfilter.DatagridDropdownFilter`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 3.4.0
+- **Version:** 3.11.3
 
 ## MDL Example
 
@@ -23,8 +23,8 @@ PLUGGABLEWIDGET 'com.mendix.widget.web.datagriddropdownfilter.DatagridDropdownFi
 | `refEntity` | association | Yes |  | Set the entity to enable filtering over association. |
 | `refOptions` | datasource |  |  | The options to show in the Drop-down filter widget. |
 | `refCaptionSource` | enumeration | Yes | attr |  |
-| `refCaption` | attribute |  |  |  |
-| `refCaptionExp` | expression |  |  |  |
+| `refCaption` | attribute | Yes |  |  |
+| `refCaptionExp` | expression | Yes |  |  |
 | `refSearchAttr` | attribute | Yes |  | Required when Filterable is set to yes |
 | `fetchOptionsLazy` | boolean | Yes | false | Lazy loading enables faster parent loading, but with personalization enabled,... |
 | `defaultValue` | expression |  |  | Empty option caption will be shown by default or if configured default value ... |

@@ -2,17 +2,20 @@
 
 - **Widget ID:** `com.mendix.widget.web.datagrid.Datagrid`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 3.4.0
+- **Version:** 3.11.3
 
 ## MDL Example
 
 ```sql
 PLUGGABLEWIDGET 'com.mendix.widget.web.datagrid.Datagrid' widget1 {
-  emptyplaceholder {
-    -- widgets for `emptyPlaceholder`
-  }
   controlbar {
     -- widgets for `filtersPlaceholder`
+  }
+  custompagination {
+    -- widgets for `customPagination`
+  }
+  emptyplaceholder {
+    -- widgets for `emptyPlaceholder`
   }
   column item1   -- one entry of `columns`
 }
@@ -22,31 +25,40 @@ PLUGGABLEWIDGET 'com.mendix.widget.web.datagrid.Datagrid' widget1 {
 
 | Property | Type | Required | Default | Description |
 |----------|------|----------|---------|-------------|
-| `advanced` | boolean | Yes | false |  |
 | `datasource` | datasource | Yes |  |  |
 | `refreshInterval` | integer | Yes | 0 |  |
-| `itemSelection` | selection | Yes |  |  |
-| `itemSelectionMethod` | enumeration | Yes | checkbox |  |
-| `itemSelectionMode` | enumeration | Yes | clear | Defines item selection behavior. |
-| `showSelectAllToggle` | boolean | Yes | true | Show a checkbox in the grid header to check or uncheck multiple items. |
-| `keepSelection` | boolean | Yes | false | If enabled, selected items will stay selected unless cleared by the user or a... |
-| `loadingType` | enumeration | Yes | spinner |  |
-| `refreshIndicator` | boolean | Yes | false | Show a refresh indicator when the data is being loaded. |
 | `columns` | object | Yes |  |  |
 | `columnsFilterable` | boolean | Yes | true |  |
-| `pageSize` | integer | Yes | 20 |  |
-| `pagination` | enumeration | Yes | buttons |  |
-| `showPagingButtons` | enumeration | Yes | always |  |
-| `showNumberOfRows` | boolean | Yes | false |  |
-| `pagingPosition` | enumeration | Yes | bottom |  |
-| `loadMoreButtonCaption` | textTemplate |  |  |  |
-| `showEmptyPlaceholder` | enumeration | Yes | none |  |
-| `emptyPlaceholder` | widgets |  |  |  |
-| `rowClass` | expression |  |  |  |
 | `onClickTrigger` | enumeration | Yes | single |  |
 | `onClick` | action |  |  |  |
 | `onSelectionChange` | action |  |  |  |
 | `filtersPlaceholder` | widgets |  |  |  |
+| `itemSelection` | selection | Yes |  |  |
+| `itemSelectionMethod` | enumeration | Yes | checkbox |  |
+| `autoSelect` | boolean | Yes | false | Automatically select the first row |
+| `itemSelectionMode` | enumeration | Yes | clear | Defines item selection behavior. |
+| `showSelectAllToggle` | boolean | Yes | true | Displays a checkbox in the grid header that allows selecting or deselecting a... |
+| `enableSelectAll` | boolean | Yes | false | Shows a banner with the option to select all rows across all pages when all r... |
+| `keepSelection` | boolean | Yes | false | If enabled, selected items will stay selected unless cleared by the user or a... |
+| `selectionCounterPosition` | enumeration | Yes | bottom |  |
+| `loadingType` | enumeration | Yes | spinner |  |
+| `refreshIndicator` | boolean | Yes | false | Show a refresh indicator when the data is being loaded. |
+| `pageSize` | integer | Yes | 20 |  |
+| `pagination` | enumeration | Yes | buttons |  |
+| `useCustomPagination` | boolean | Yes | false |  |
+| `customPagination` | widgets |  |  |  |
+| `showPagingButtons` | enumeration | Yes | always |  |
+| `showNumberOfRows` | boolean | Yes | false |  |
+| `pagingPosition` | enumeration | Yes | bottom |  |
+| `loadMoreButtonCaption` | textTemplate |  |  |  |
+| `dynamicPageSize` | attribute |  |  | Attribute to set the page size dynamically. |
+| `dynamicPage` | attribute |  |  | Attribute to set the page dynamically. |
+| `totalCountValue` | attribute |  |  | Attribute to store current total count |
+| `dynamicItemCount` | attribute |  |  | Read-only attribute reflecting the number of rows currently loaded. |
+| `showEmptyPlaceholder` | enumeration | Yes | none |  |
+| `emptyPlaceholder` | widgets |  |  |  |
+| `rowClass` | expression |  |  |  |
+| `customRowKey` | expression |  |  | Stable identifier for rows to maintain scroll position when using view entities. |
 | `columnsSortable` | boolean | Yes | true | Enable sorting for all columns unless specified otherwise in the column setting |
 | `columnsResizable` | boolean | Yes | true | Enable resizing for all columns unless specified otherwise in the column setting |
 | `columnsDraggable` | boolean | Yes | true | Enable reordering for all columns unless specified otherwise in the column se... |
@@ -60,15 +72,23 @@ PLUGGABLEWIDGET 'com.mendix.widget.web.datagrid.Datagrid' widget1 {
 | `cancelExportLabel` | textTemplate |  |  | Assistive technology will read this upon reaching a cancel button. |
 | `selectRowLabel` | textTemplate |  |  | If selection is enabled, assistive technology will read this upon reaching a ... |
 | `selectAllRowsLabel` | textTemplate |  |  | If selection is enabled, assistive technology will read this upon reaching 'S... |
-| `selectedCountTemplateSingular` | textTemplate |  |  | Must include '%d' to denote number position ('%d row selected') |
-| `selectedCountTemplatePlural` | textTemplate |  |  | Must include '%d' to denote number position ('%d rows selected') |
+| `singleSelectionColumnLabel` | textTemplate |  |  | If single selection is enabled, assistive technology will read this for the s... |
+| `selectingAllLabel` | textTemplate |  |  | ARIA label for the progress dialog when selecting all items |
+| `cancelSelectionLabel` | textTemplate |  |  | ARIA label for the cancel button in the selection progress dialog |
+| `selectedCountTemplateSingular` | textTemplate |  |  | Must include '%d' to denote number position |
+| `selectedCountTemplatePlural` | textTemplate |  |  | Must include '%d' to denote number position |
+| `selectAllText` | textTemplate | Yes |  |  |
+| `selectAllTemplate` | textTemplate | Yes |  | This caption used when total count is available. |
+| `allSelectedText` | textTemplate | Yes |  |  |
+| `clearSelectionButtonLabel` | textTemplate |  |  | Customize the label of the 'Clear section' button |
 
 ## Child Slots (curly-brace blocks)
 
 | MDL keyword | Widget property |
 |-------------|----------------|
-| `emptyplaceholder` | `emptyPlaceholder` |
 | `controlbar` | `filtersPlaceholder` |
+| `custompagination` | `customPagination` |
+| `emptyplaceholder` | `emptyPlaceholder` |
 
 ## Object Lists (repeating child entries)
 
@@ -82,6 +102,9 @@ Item properties:
 | `attribute` | attribute |
 | `dynamicText` | texttemplate |
 | `exportValue` | texttemplate |
+| `exportType` | primitive |
+| `exportNumberFormat` | expression |
+| `exportDateFormat` | expression |
 | `header` | texttemplate |
 | `tooltip` | texttemplate |
 | `visible` | expression |

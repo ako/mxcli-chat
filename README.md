@@ -31,6 +31,21 @@ Nobody. Single user, no auth.
 | Database | local PostgreSQL 16, database `mxclichat` |
 | Marketplace content | all modules and widgets on their latest 11.13.0-compatible versions, except NanoflowCommons 6.0.0 (its installed version was unpublished, so `marketplace update` cannot baseline it — see `FINDINGS.md`) |
 
+## Agent stack
+
+The app is built on Mendix's agent-editor stack, so chats, tools and MCP servers
+are first-class model documents (`create agent`, `create model`,
+`create knowledge base`, `create consumed mcp service`) rather than hand-rolled
+REST plumbing. Installed: GenAI Commons, Mendix Cloud GenAI Connector, Agent
+Commons, Agent Editor, MCP Client, Conversational UI, Encryption, Community
+Commons, plus the Markdown viewer and Events widgets.
+
+`AgentEditorCommons.ASU_AgentEditor` is wired as the after-startup microflow —
+it materialises the model's agent documents into runtime rows at boot.
+
+`Encryption.EncryptionKey` is set in the `Default` configuration to a **development
+key that is committed to this repo**. Override it per environment before deploying.
+
 ## Working on it
 
 The `mxcli` binary is git-ignored (~86 MB). `.claude/bootstrap-mxcli.sh` rebuilds it
