@@ -114,3 +114,63 @@ had to be discovered by reading module internals or a stack trace.
 Version B is the control. If it takes 25 microflows and a week of JSON mapping,
 the modules earned their keep. If it takes 12 and never surprises anyone, that is
 worth knowing too.
+
+## Version B, first data point: the wire format
+
+Version B has to model what GenAI Commons owned in version A. So far:
+
+| Artifact | Count |
+|---|---|
+| Domain entities for the conversation | 2 (`Chat`, `Message`) |
+| Domain entities that exist only for the wire | 8 |
+| JSON structures | 3 |
+| Import mappings | 2 |
+| Export mappings | 1 |
+| Data transformers (JSLT) | 2 |
+| Constants | 3 |
+
+Three of those wire entities carry no data at all: `RequestMessages` and
+`RequestTools` exist because an export mapping cannot bind a root entity
+directly to a JSON array (FINDINGS 48), and `McpToolList` is the import
+counterpart. Version A modelled zero entities.
+
+### The arbitrary-schema question, answered
+
+The sharpest part of the comparison was expected to be `tools[].function.parameters`
+— a JSON Schema chosen per tool, which a design-time mapping cannot describe. It
+is not a wall. A data transformer (Mendix 11.9+) carries it: the export mapping
+treats the schema as an opaque **string** attribute, and one JSLT step splices it
+back in as real JSON with `from-json`. Verified in the runtime — the mapping
+emits `"parameters":"{\"type\":\"object\",…}"` and the transformer emits a valid
+chat-completions request with the schema nested inside it. `to-json` does the
+same in reverse for an MCP server's `inputSchema`.
+
+This changes the tally in version B's favour more than expected, and it is worth
+being precise about why: **the arbitrary JSON is not the expensive part — the
+ordinary JSON is.** Every failure so far came from the fixed-shape half of the
+work: an ownership flag on an association (47), a container entity that only the
+runtime asks for (48), a source sample that will not take dollar quoting (50), an
+error-handling type the activity does not support (49). The one genuinely
+open-ended requirement took four lines of JSLT and worked first time.
+
+It is also not a hack. Mendix's own OpenAI Connector solves the same problem the
+same way, one abstraction lower: its request structure carries a `schema` string
+beside `function`, and a shipped Java action (`RequestMapping_ManipulateJson`)
+re-parses it with Jackson and splices it in. Version B does declaratively what
+that connector does in Java — which is a fair summary of what the marketplace
+modules are: someone else's workarounds, already written.
+
+### Running score
+
+| | Version A | Version B so far |
+|---|---|---|
+| Marketplace modules | 8 + 3 transitive | 0 |
+| Entities modelled | 0 | 10 |
+| Mappings / structures / transformers | 0 | 8 |
+| Microflows | 6 | 1 |
+| Java actions | 1 (a bridge around a module) | 0 |
+| Runtime-only failures survived | 4 | 4 |
+
+The interesting column is the last one. Both versions cost about the same in
+surprises per hour; they were just different surprises. Version A's came from
+module conventions, version B's from Mendix's own integration layer.

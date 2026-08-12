@@ -1021,3 +1021,144 @@ what makes it a twenty-minute problem instead of a one-minute one.
 
 The import mapping over the same array shape needed no such thing: `create
 Module.Child_Parent/Module.Child = jsonKey` works with a plain reference.
+
+## 2026-08-12, late — arbitrary JSON, and what a data transformer buys
+
+### 48. `owner both` was necessary but not sufficient: arrays need a container entity
+
+Finding 47 got the mapping to *build*. It still could not *run*. The first time
+the export mapping was executed against a root that had one child row, the
+runtime threw:
+
+```
+com.mendix.modules.microflowengine.MicroflowException:
+Can not write a field name, expecting a value
+  at MxcliChatRest.SUB_ChatRequest_Build (Export with mapping : 'Export to JSON')
+Caused by: com.fasterxml.jackson.core.JsonGenerationException:
+  at com.mendix.integration.exporter.json.JsonExportWriter.writeValue
+```
+
+Isolated with three cases in one boot:
+
+| Root exported | Result |
+|---|---|
+| no children | `{"model":"case1-root-only"}` |
+| one message | throws |
+| one message + one tool | throws |
+
+So it is not about tools, or about `from-json`, or about how many arrays there
+are. **An export mapping cannot bind the root entity directly to a JSON array.**
+A JSON array of objects is two elements in Mendix's tree — the array
+(`messages`) and its item (`MessagesItem`) — and the mapping needs an entity for
+each. The item entity holds the data; the container entity holds nothing:
+
+```
+RequestRoot ──< RequestMessages (container, no attributes) ──< RequestMessage (item)
+```
+
+```sql
+MxcliChatRest.RequestMessages_RequestRoot/MxcliChatRest.RequestMessages as messages {
+  MxcliChatRest.RequestMessage_RequestMessages/MxcliChatRest.RequestMessage as MessagesItem {
+    role = Role, content = Content
+  }
+}
+```
+
+Both associations need `owner both`. mxcli's own reference documents the pattern
+("Arrays in export require an intermediate container entity") — it is the skill
+files that don't, and the failure mode is what makes it expensive: **`mx check`
+reports 0 errors either way**, and an empty root exports cleanly, so the broken
+mapping ships and only fails once there is data in it. Import mappings do not
+need the container; the two directions genuinely need different domain models
+for the same JSON.
+
+The entity is dead weight in the model, so it is worth saying plainly what it
+is: `RequestMessages` and `RequestTools` exist only because the exporter needs
+somewhere to stand. They carry a single unused attribute because an entity with
+no members is awkward to model.
+
+### 49. `TRANSFORM` does not support error handling
+
+```
+Error handling type is not supported
+  at Transform JSON activity 'Transform JSON' in Microflow 'PROBE_Transform'
+```
+
+`export to mapping … on error continue` is fine; `transform … on error continue`
+is not. mxcli's syntax check accepts it and mxbuild rejects it. Guard the input
+with an `if` instead.
+
+### 50. `SOURCE JSON` takes a single-quoted string only
+
+`create data transformer … source json $$…$$` does not parse, though the
+reference documents `$$` quoting for multi-line samples. The JSLT steps *do*
+accept `$$`. Simplest fix is to keep the sample on one line in single quotes and
+to choose a sample whose string values contain no quotes of their own —
+`"parameters":"{}"` rather than an escaped schema.
+
+### 51. Mendix's JSLT keeps null-valued keys
+
+Upstream JSLT drops an object key whose value evaluates to null; Mendix's build
+(`com.mendix.mendix-jslt`, a fork of Schibsted's JSLT with the package renamed)
+keeps it:
+
+```
+input  {"a":1}
+jslt   {"kept": .b, "literal": null, "absent": .nope}
+output {"kept": null, "literal": null, "absent": null}
+```
+
+So the idiomatic `"tools": if (.tools) […] else null` does not omit the key, it
+sends `"tools": null` — which is not the same request. The conditional-key form
+`if (.tools) "tools": […]` is worse: it evaluates to a null *key* and throws
+`Object key must be string`. Emit the key unconditionally, or use two
+transformers.
+
+### 52. `from-json` is the answer to arbitrary JSON — and Mendix wrote it in Java
+
+The problem: `tools[].function.parameters` is a JSON Schema chosen by whoever
+wrote the tool. A mapping walks a JSON structure fixed at design time, so it
+cannot emit a shape it has never seen.
+
+The answer: carry the schema as a **string** attribute through the export
+mapping, then splice it in with a JSLT step.
+
+```
+"parameters": from-json(.parameters)
+```
+
+Verified in the runtime, not just at design time. The mapping emits
+
+```json
+"parameters":"{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\"}}}"
+```
+
+and the transformer turns that into a real nested object inside a valid
+chat-completions request. The same trick runs inbound: `to-json(.inputSchema)`
+collapses an MCP server's arbitrary `inputSchema` into a string an ordinary
+import mapping can store, and the stored string feeds straight back into
+`from-json` on the next request.
+
+The transformer earns a second keep beyond the arbitrary part: it also absorbs
+*shape*. The mapping emits a flat tool (`{name, description, parameters}`) and
+the JSLT nests it into `{"type":"function","function":{…}}`, which saves two
+entities and an association that would otherwise exist only to model a wrapper
+object.
+
+Worth knowing that this is not a workaround around Mendix — it is what Mendix
+does. The OpenAI Connector's own request JSON structure carries a sibling
+`schema` string next to `function`, and the module ships a Java action,
+`RequestMapping_ManipulateJson`, that post-processes the mapping's output with
+Jackson:
+
+```java
+// Check if tool has a schema field and use it if it's valid JSON
+String schema = tool.getSchema();
+JsonNode schemaNode = MAPPER.readTree(schema);
+…
+// Remove schema field from tool node as it's not needed in the final payload
+((ObjectNode) toolNode).remove("schema");
+```
+
+That connector predates data transformers (Mendix 11.9+). Version B gets the
+same result declaratively, in four lines of JSLT, with no Java.
