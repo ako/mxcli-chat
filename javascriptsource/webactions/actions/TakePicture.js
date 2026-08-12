@@ -55,6 +55,7 @@ export async function TakePicture(picture, showConfirmationScreen, pictureQualit
         let stream;
         let videoIsReady = false;
         let shouldFaceEnvironment = true;
+        let retryAttempt = 0;
         const {
             video,
             wrapper,
@@ -83,13 +84,32 @@ export async function TakePicture(picture, showConfirmationScreen, pictureQualit
             resolve(false);
         });
         switchControl.addEventListener("click", switchControlHandler);
-        actionControl.addEventListener("click", () => {
+        actionControl.addEventListener("click", actionControlClicked);
+        video.addEventListener("loadedmetadata", () => (videoIsReady = true));
+        function actionControlClicked() {
+             if(!videoIsReady){
+                actionControl.disabled = true;
+                // reload video if not ready yet (some devices need this extra step)
+                if(retryAttempt < 3){
+                    retryAttempt++;
+                } else {
+                    mx.ui.error(getUserText("Media not available.", "Media niet beschikbaar."));
+                    return;
+                }
+                video.load();
+                setTimeout(() => {
+                    actionControlClicked();
+                }, 50);
+                return;
+            }
+
             removeAllControlButtons();
             if (showConfirmationScreen) {
                 // Delay the `takePictureHandler` to the next cycle so the UI preparations can go first. Otherwise, the control-buttons are not removed while the second screen is being set up.
                 setTimeout(() => {
                     takePictureHandler(() => {
                         addAllControlButtons();
+                        retryAttempt = 0;
                         video.play();
                     });
                 }, 0);
@@ -101,8 +121,9 @@ export async function TakePicture(picture, showConfirmationScreen, pictureQualit
                     closeControlHandler();
                 });
             }
-        });
-        video.addEventListener("loadedmetadata", () => (videoIsReady = true));
+
+            actionControl.disabled = false;
+        }
         function getVideoCanvas() {
             const videoCanvas = document.createElement("canvas");
             videoCanvas.height = video.videoHeight;
@@ -222,7 +243,7 @@ export async function TakePicture(picture, showConfirmationScreen, pictureQualit
                             cleanupConfirmationElements();
                             onResumeFirstScreen();
                         });
-                        // eslint-disable-next-line no-inner-declarations
+                         
                         function cleanupConfirmationElements() {
                             document.body.removeChild(confirmationWrapper);
                             videoCanvas.remove();
@@ -392,9 +413,9 @@ export async function TakePicture(picture, showConfirmationScreen, pictureQualit
     function prepareLanguage() {
         const englishFn = english => english;
         try {
-            return mx.session.sessionData.locale.code.toLowerCase().includes("en")
-                ? englishFn
-                : (_english, dutch) => dutch;
+            return mx.session.sessionData.locale.code.toLowerCase().includes("nl")
+                ? (_english, dutch) => dutch
+                : englishFn;
         } catch (_) {
             return englishFn;
         }

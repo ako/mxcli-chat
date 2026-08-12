@@ -8,7 +8,7 @@ while provisioning and developing MxcliChat.
 | | |
 |---|---|
 | Mendix | 11.13.0 |
-| mxcli | built from source, `ako/mxcli` `main` @ `d53691b8ce159c8d64b7645b9a95b028235ecb3e` (self-reported `mxcli --version` → `mxcli version d53691b`) |
+| mxcli | built from source, `ako/mxcli` `main` @ `d762d2e` (`mxcli --version` → `mxcli version d762d2e`). Provisioning was done on the earlier `d53691b`; findings 8/10 date from that build and are **superseded** — see the 15:50 section. |
 | Go | 1.24.7 linux/amd64 |
 | ANTLR | 4.13.2 generator (pinned by `mdl/grammar/Makefile`, matched to the 4.13.1 runtime in `go.mod`) |
 | PostgreSQL | 16, local (`/usr/lib/postgresql/16/bin`) |
@@ -125,10 +125,16 @@ the one already up. Two runs both want :8080. Stop the first, or pass `--app-por
 ## 2026-08-12 — Upgrading marketplace content
 
 Goal: bring all bundled marketplace content to the latest 11.13.0-compatible
-version. Outcome: **20 of 21 upgradeable widgets done, 0 modules** — the module
-half is not possible from the CLI at all, by design.
+version. Outcome *at the time*: 20 of 21 widgets done, 0 modules.
+
+> **Read the next section before trusting this one.** An hour later, on a newer
+> `main`, the modules and the last widget all upgraded too.
 
 ### 8. Marketplace **modules** cannot be updated from the CLI — confirmed twice
+
+> **SUPERSEDED (same day, one hour later).** True of `d53691b`, false of `d762d2e`:
+> `mxcli marketplace update` landed in between. Kept for the record — the *reasons*
+> below are still why the command has to transplant GUIDs. See finding 12.
 
 `mxcli marketplace install <id>` detects the installed module and stops:
 
@@ -190,6 +196,10 @@ One install failed transiently on `TLS handshake timeout` fetching the CDN
 
 ### 10. The Image widget upgrade is blocked — `widget sync` does not clear CE0463
 
+> **SUPERSEDED by `mxcli fix widgets`** (finding 13). Image is now on 1.6.0 with
+> `mx check` clean. Everything below about `widget sync` and about `mx update-widgets`
+> collapsing MPR v2 still holds — `fix widgets` is what wraps the latter safely.
+
 `Image` 1.5.0 → 1.6.0 (id 118579) adds four properties
 (`maxHeight`/`maxHeightUnit`/`minHeight`/`minHeightUnit`). Installing it turns a
 clean project into **64 × CE0463** *"The definition of this widget has changed"*,
@@ -234,3 +244,127 @@ widget definitions and the generated `.ai-context/skills/widgets/` docs match th
 new packages — otherwise `CREATE PAGE` authors against yesterday's schema. Here
 it reported `0 new, 1 refreshed, 32 up to date`: only PopupMenu's schema had
 actually changed, which is why the other 19 upgrades caused no errors.
+
+---
+
+## 2026-08-12, later — `marketplace update` lands; all modules upgraded
+
+The headline correction: **findings 8 and 10 were obsolete within the hour.**
+`main` moved from `d53691b` to `d762d2e` while this session was running, adding
+`mxcli marketplace update`, `mxcli marketplace diff` and `mxcli fix`. Everything
+that was reported as impossible above is now done.
+
+### 12. `mxcli marketplace update` updates an installed module in place
+
+```
+mxcli marketplace diff   <content-id> -p <app>.mpr --to <version>   # preview
+mxcli marketplace update <content-id> -p <app>.mpr --to <version>
+```
+
+It transplants element GUIDs (so the runtime does not treat the module's tables
+as new and drop them) and restores the user-role → module-role grants that live
+in the project's security document rather than in the module. Both showed up in
+the output — Administration reported `9 element identities preserved, 2 role
+grant(s) restored`, FeedbackModule `19 … 1`.
+
+All six upgradeable modules are now current:
+
+| Module | From | To |
+|---|---|---|
+| Atlas_Core | 4.1.3 | **4.3.8** |
+| Atlas_Web_Content | 4.1.0 | **4.3.0** |
+| Administration | 4.3.2 | **4.5.0** |
+| DataWidgets | 3.5.0 | **3.11.3** |
+| FeedbackModule | 4.0.2 | **5.0.0** |
+| WebActions | 2.11.0 | **2.11.2** |
+
+**It does not roll back.** If a step fails partway the module is already gone, so
+commit first — which is the only reason this was safe to run six times in a row.
+
+### 13. `mxcli fix widgets` / `fix design-properties` — the missing repair step
+
+A headless module update leaves CE0463 (widget definitions) and CE6087 (renamed
+design properties) behind; the update output says so and names the fix. These
+wrap `mx update-widgets` / `mx rename-design-properties` — the tools that
+otherwise collapse MPR v2 — by running them, reading the result back, and
+rewriting it into v2 storage with mxcli's own writer.
+
+**Verified:** `395 .mxunit file(s), unchanged from 395 before (MPR v2 preserved)`
+and the `.mpr` stayed at 76 KB, against the 14 MB v1 blob bare `mx update-widgets`
+produced in finding 10's sandbox. Run both after every module update; `mx check`
+went 16 errors → 0.
+
+This also unblocks the **Image widget**: install 1.6.0, run `mxcli fix widgets`,
+0 errors. Finding 10's 64 CE0463s are gone.
+
+### 14. A later module update silently downgrades widgets an earlier one installed
+
+Module packages bundle their own copies of shared widgets. Updating
+Atlas_Web_Content and FeedbackModule *after* DataWidgets overwrote five of the
+nine Data Widgets packages back to **3.4.0**, and put **Charts 6.3.0** over the
+6.3.2 installed earlier. Nothing warned; `mx check` stayed clean, because an
+older widget is not an error.
+
+**Order matters: do every module update first, then re-apply standalone widgets,
+then verify versions.** Checking the `.mpk` versions is the only way to see it:
+
+```sh
+for f in widgets/*.mpk; do
+  printf "%-50s %s\n" "$(basename $f)" \
+    "$(unzip -p "$f" package.xml | grep -oP 'version="\K[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+done
+```
+
+Repaired by copying the nine widgets out of the DataWidgets 3.11.3 `.mpk`
+(`marketplace download 116540 --version 3.11.3`) and reinstalling Charts.
+
+### 15. NanoflowCommons cannot be updated — its installed version was unpublished
+
+The blank 11.13.0 app ships **NanoflowCommons 6.0.0**, and 6.0.0 is no longer on
+the marketplace (the 6.x line now starts at 6.1.1). Both `diff` and `update` fail
+with `version "6.0.0" not found`, because both download the *installed* version's
+package to establish the local-edit baseline. `--force` does not bypass it.
+
+So the one module still stale is NanoflowCommons 6.0.0 → 7.2.1. A `--no-baseline`
+escape hatch (accept "we could not tell" and update anyway) would close this.
+
+### 16. `marketplace diff` reports local edits on a project nobody has edited
+
+On this untouched blank app, `diff` flagged `SNIPPET FeedbackWidget` (Atlas_Core),
+`BUILDING_BLOCK Master_Detail` (Atlas_Web_Content) and four FeedbackModule
+elements as locally modified. Nobody edited them — the comparison is on `DESCRIBE`
+output, and these are elements `DESCRIBE` renders imperfectly. The saved
+`--save-edits` MDL gives it away: the Atlas_Core snippet comes out as an empty
+`create or modify snippet Atlas_Core.FeedbackWidget (Folder: 'Web') { }`, and the
+building block as `DataSource: database from ,` — under a header that says
+*"Building blocks are read-only; they cannot be created via MDL."*
+
+**Do not replay saved edits blind.** Replaying that snippet would have emptied it.
+Read the file, decide, then `--force`. `diff` is still worth running: it separates
+`changed` from `unknown` honestly, and the `unknown` rows (every `PAGE_TEMPLATE`
+in Atlas_Web_Content — "no DESCRIBE support") say plainly what it could not check.
+
+### 17. `SHOW MODULES` page counts changed between the two mxcli builds
+
+`d53691b` reported Atlas_Web_Content as having **46 pages**; `d762d2e` reports
+**0** — for the *same* project. It reads as catastrophic content loss after an
+update and is not: `SHOW PAGES IN Atlas_Web_Content` returns 0 on both builds, so
+the older column was counting page templates as pages.
+
+**Verified** by checking the pre-update commit out into a `git worktree` and
+running the *new* binary against it: 0 pages there too. Compare like with like —
+when the tool changed under you, re-measure the baseline with the new tool before
+believing a diff.
+
+### 18. The FeedbackModule update leaves an unpacked duplicate widget behind
+
+After updating to 5.0.0, `widgets/` held both `SprintrFeedbackWidget.mpk` and an
+unpacked `widgets/SprintrFeedbackWidget/` directory — same widget, same version
+12.0.4. `mx check` tolerates it (0 errors either way). Removed as unintended;
+every other widget in the project ships as a `.mpk` only.
+
+### Final state
+
+Every module and widget is on its latest 11.13.0-compatible version except
+**NanoflowCommons 6.0.0** (finding 15). `mx check`: **0 errors**.
+`./mxcli run --local`: **HTTP 200**.

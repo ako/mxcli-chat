@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.timeseries.TimeSeries`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 6.3.2
+- **Version:** 6.3.0
 
 ## MDL Example
 

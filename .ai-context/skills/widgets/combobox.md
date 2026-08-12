@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.combobox.Combobox`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 2.5.0
+- **Version:** 2.6.1
 
 ## MDL Example
 
@@ -54,7 +54,6 @@ PLUGGABLEWIDGET 'com.mendix.widget.web.combobox.Combobox' widget1
 | `onEnterEvent` | action |  |  |  |
 | `onLeaveEvent` | action |  |  |  |
 | `onChangeFilterInputEvent` | action |  |  |  |
-| `filterInputDebounceInterval` | integer | Yes | 200 | The debounce interval for each filter input change event triggered in millise... |
 | `ariaRequired` | expression | Yes | false |  |
 | `ariaLabel` | textTemplate |  |  | Used to describe the combo box. |
 | `clearButtonAriaLabel` | textTemplate |  |  | Used to clear all selected values. |
@@ -66,4 +65,5 @@ PLUGGABLEWIDGET 'com.mendix.widget.web.combobox.Combobox' widget1
 | `loadingType` | enumeration | Yes | spinner |  |
 | `selectedItemsSorting` | enumeration | Yes | none | How selected items should be sorted. |
 | `filterType` | enumeration | Yes | contains |  |
+| `filterInputDebounceInterval` | integer | Yes | 200 | The debounce interval for each filter input change event triggered in millise... |
 

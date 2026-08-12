@@ -26,10 +26,10 @@ Nobody. Single user, no auth.
 |---|---|
 | Mendix version | 11.13.0 |
 | Theme | `ledger` (warm paper, hairline rules, serif headings) |
-| mxcli | built from source, `ako/mxcli` `main` @ `d53691b` |
+| mxcli | built from source, `ako/mxcli` `main` @ `d762d2e` |
 | Project file | `MxcliChat.mpr` at the repo root |
 | Database | local PostgreSQL 16, database `mxclichat` |
-| Marketplace content | standalone widgets upgraded to latest 11.13.0-compatible; modules and the Image widget still need Studio Pro — see `FINDINGS.md` |
+| Marketplace content | all modules and widgets on their latest 11.13.0-compatible versions, except NanoflowCommons 6.0.0 (its installed version was unpublished, so `marketplace update` cannot baseline it — see `FINDINGS.md`) |
 
 ## Working on it
 

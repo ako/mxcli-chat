@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.datagridnumberfilter.DatagridNumberFilter`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 3.4.0
+- **Version:** 3.11.3
 
 ## MDL Example
 

@@ -2,7 +2,7 @@
 
 - **Widget ID:** `com.mendix.widget.web.image.Image`
 - **Type:** PLUGGABLEWIDGET
-- **Version:** 1.5.0
+- **Version:** 1.6.0
 
 ## MDL Example
 
@@ -30,8 +30,8 @@ PLUGGABLEWIDGET 'com.mendix.widget.web.image.Image' widget1
 | `height` | integer | Yes | 100 |  |
 | `minHeightUnit` | enumeration | Yes | none |  |
 | `minHeight` | integer | Yes | 0 |  |
-| `maxHeightUnit` | enumeration | Yes | none |  |
-| `maxHeight` | integer | Yes | 0 |  |
+| `maxHeightUnit` | enumeration | Yes | pixels |  |
+| `maxHeight` | integer | Yes | 250 |  |
 | `iconSize` | integer | Yes | 14 | The size of the icon in pixels. |
 | `displayAs` | enumeration | Yes | fullImage |  |
 | `responsive` | boolean | Yes | true | Image will never get larger than its original size. It can become smaller. |
