@@ -1,0 +1,61 @@
+/**
+ * Version B's wire mappings and configuration.
+ *
+ * Version A never had to write any of this — GenAI Commons owns the request and
+ * response shapes there, and the OpenAI Connector owns the call. Here the app
+ * declares both halves of the contract itself.
+ */
+
+/** The OpenRouter API key. Empty by default — a secret does not belong in git. */
+create constant MxcliChatRest.OpenRouterApiKey
+  TYPE String
+  DEFAULT ''
+  COMMENT 'OpenRouter API key. Set it on the running app over the M2EE admin port, or as a per-environment value at deploy time.';
+/
+
+/** The base URL, so a different OpenAI-compatible host needs no model change. */
+create constant MxcliChatRest.OpenRouterBaseUrl
+  TYPE String
+  DEFAULT 'https://openrouter.ai/api/v1'
+  COMMENT 'Base URL of the OpenAI-compatible API.';
+/
+
+/** Which model to ask. Free models carry a :free suffix. */
+create constant MxcliChatRest.OpenRouterModel
+  TYPE String
+  DEFAULT 'openai/gpt-oss-20b:free'
+  COMMENT 'OpenRouter model id. Must support tool calling for the memory tools to work.';
+/
+
+/** Reads the response half of POST /chat/completions. */
+create import mapping MxcliChatRest.IMM_ChatCompletion
+  with json structure MxcliChatRest.JSON_ChatCompletion
+{
+  create MxcliChatRest.CompletionResponse {
+    CompletionId = id,
+    ModelId = model,
+    create MxcliChatRest.CompletionChoice_CompletionResponse/MxcliChatRest.CompletionChoice = choices {
+      ChoiceIndex = index,
+      FinishReason = finish_reason,
+      create MxcliChatRest.CompletionMessage_CompletionChoice/MxcliChatRest.CompletionMessage = message {
+        Role = role,
+        Content = content
+      }
+    }
+  }
+};
+/
+
+/** Writes the request half. */
+create export mapping MxcliChatRest.EMM_ChatRequest
+  with json structure MxcliChatRest.JSON_ChatRequest
+{
+  MxcliChatRest.RequestRoot {
+    model = ModelId,
+    MxcliChatRest.RequestMessage_RequestRoot/MxcliChatRest.RequestMessage as messages {
+      role = Role,
+      content = Content
+    }
+  }
+};
+/

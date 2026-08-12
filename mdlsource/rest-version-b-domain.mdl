@@ -1,0 +1,128 @@
+/**
+ * MxcliChatRest — version B of the comparison, on plain REST and microflows.
+ *
+ * Same app as version A, none of the GenAI modules. Everything version A got
+ * from AgentCommons, ConversationalUI and GenAICommons is modelled here: the
+ * conversation, the messages, the wire format of the OpenAI-compatible API, and
+ * later the tool loop and the MCP client.
+ *
+ * Memory is NOT modelled here — both versions call the same MCP tools published
+ * by MxcliChatCore, so the tool surface is a constant and the chat plumbing is
+ * the variable.
+ *
+ * This file is the domain model and the wire format. The call, the tool loop and
+ * the page follow in their own scripts.
+ */
+
+create module "MxcliChatRest";
+
+/** Who produced a message. Mirrors the OpenAI role vocabulary. */
+create enumeration "MxcliChatRest"."ENUM_MessageRole" (
+  System 'System',
+  User 'User',
+  Assistant 'Assistant',
+  Tool 'Tool'
+);
+/
+
+/** One conversation. Version A got this from ConversationalUI.ChatContext. */
+create persistent entity "MxcliChatRest"."Chat" (
+  "Title": string(200),
+  "StartedAt": datetime,
+  "LastMessageAt": datetime,
+  "ModelName": string(200)
+);
+/
+
+/** One turn. Version A got this from ConversationalUI.Message. */
+create persistent entity "MxcliChatRest"."Message" (
+  "Role": MxcliChatRest.ENUM_MessageRole default User,
+  "Content": string,
+  "SequenceNumber": integer,
+  "CreatedAt": datetime,
+  /** Set on assistant turns that asked for tools, for the trace. */
+  "ToolCallSummary": string(1000)
+)
+index idx_message_sequence ("SequenceNumber");
+/
+
+create association "MxcliChatRest"."Message_Chat"
+from "MxcliChatRest"."Message" to "MxcliChatRest"."Chat"
+type reference
+delete_behavior DELETE_AND_REFERENCES;
+/
+
+-- ---------------------------------------------------------------------------
+-- The wire format. Version A never saw this: GenAI Commons owns it there.
+-- ---------------------------------------------------------------------------
+
+/**
+ * The response half of POST /chat/completions, trimmed to what this app reads.
+ *
+ * Deliberately minimal — usage, logprobs and the streaming variants are all
+ * omitted. A JSON structure has to match the payload's shape, not the API's
+ * full surface.
+ */
+create json structure MxcliChatRest.JSON_ChatCompletion
+  snippet '{"id":"chatcmpl-1","model":"openai/gpt-oss-20b:free","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"Hello."}}]}';
+/
+
+/** The request half. */
+create json structure MxcliChatRest.JSON_ChatRequest
+  snippet '{"model":"openai/gpt-oss-20b:free","messages":[{"role":"user","content":"Hello."}]}';
+/
+
+create non-persistent entity MxcliChatRest."CompletionResponse" (
+  "CompletionId": string,
+  "ModelId": string
+);
+/
+
+create non-persistent entity MxcliChatRest."CompletionChoice" (
+  "ChoiceIndex": integer,
+  "FinishReason": string
+);
+/
+
+create non-persistent entity MxcliChatRest."CompletionMessage" (
+  "Role": string,
+  "Content": string
+);
+/
+
+create association MxcliChatRest.CompletionChoice_CompletionResponse
+from MxcliChatRest.CompletionChoice to MxcliChatRest.CompletionResponse
+type reference;
+/
+
+create association MxcliChatRest.CompletionMessage_CompletionChoice
+from MxcliChatRest.CompletionMessage to MxcliChatRest.CompletionChoice
+type reference;
+/
+
+create non-persistent entity MxcliChatRest."RequestRoot" (
+  "ModelId": string
+);
+/
+
+create non-persistent entity MxcliChatRest."RequestMessage" (
+  "Role": string,
+  "Content": string,
+  "Ordinal": integer
+);
+/
+
+/**
+ * `owner both` is load-bearing. An export mapping that walks parent -> children
+ * needs the association navigable in both directions; a plain `type reference`
+ * is rejected by MxBuild with
+ *   CE0295 "Association 'MxcliChatRest.RequestMessage_RequestRoot' is not allowed."
+ * at the array's object mapping element. Reversing the association into a
+ * RequestRoot -> RequestMessage reference_set does NOT help — only `owner both`
+ * does.
+ */
+create association MxcliChatRest."RequestMessage_RequestRoot"
+from MxcliChatRest."RequestMessage" to MxcliChatRest."RequestRoot"
+type reference
+owner both;
+/

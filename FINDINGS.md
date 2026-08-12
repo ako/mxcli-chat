@@ -968,3 +968,56 @@ drives the app fine.
 One Atlas detail: at 1280×900 the navigation sidebar is collapsed, so menu items
 are in the DOM but not visible and `click()` times out. `dispatchEvent('click')`
 on `a[title="…"]` gets through.
+
+---
+
+## 2026-08-12, late — version B begins
+
+### 46. `create entity Module.X (NON_PERSISTENT)` is not valid syntax
+
+`rest-call-from-json.md` documents
+
+```sql
+create entity Module.MyRootObject (NON_PERSISTENT)
+  stringField : string
+  intField    : integer;
+```
+
+which does not parse — `extraneous input ':' expecting the start of a statement`.
+The working form is the one in `mdl-entities.md`:
+
+```sql
+create non-persistent entity Module."MyRootObject" (
+  "StringField": string,
+  "IntField": integer
+);
+```
+
+Also caught by `mxcli check`: **`Id` is a reserved attribute name** (MDL021 →
+CE7247), with a suggested rename. Worth quoting every identifier, as CLAUDE.md
+says, but a reserved *attribute* name is refused regardless of quoting.
+
+### 47. An export mapping over an array needs `owner both` on the association
+
+Modelling `{"messages":[…]}` as a parent entity with child rows fails to build:
+
+```
+[CE0295] "Association 'MxcliChatRest.RequestMessage_RequestRoot' is not allowed."
+  at Object mapping element 'Messages'
+```
+
+Three shapes tried, in order:
+
+| Association | Result |
+|---|---|
+| `RequestMessage -> RequestRoot`, `type reference` | CE0295 |
+| `RequestRoot -> RequestMessage`, `type reference_set` | CE0295 |
+| `RequestMessage -> RequestRoot`, `type reference owner both` | **builds** |
+
+So the direction is not the problem — ownership is. An export mapping walks
+parent → children, and that navigation is only allowed when both ends own the
+association. The error names the association rather than the ownership, which is
+what makes it a twenty-minute problem instead of a one-minute one.
+
+The import mapping over the same array shape needed no such thing: `create
+Module.Child_Parent/Module.Child = jsonKey` works with a plain reference.
