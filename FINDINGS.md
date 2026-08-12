@@ -840,3 +840,44 @@ mxcli only passes it when the app is served behind an external URL (`--hub`), an
 on a local run leaves the runtime to default it, which it does not do. Reverted to
 the stock value. Untested alternative:
 `run --local --runtime-setting ApplicationRootUrl=http://localhost:8080/`.
+
+### 40. Seeding an AgentCommons agent as data: what has to be linked
+
+Version A's agent is created in a startup microflow rather than as an
+agent-editor document. The non-obvious parts:
+
+- `AgentCommons.Agent` is versioned. `Agent_Version_InUse` is what
+  `Agent_Call_WithHistory` resolves — the Java action's own documentation says
+  *"There must be an 'In Use' version in order to not fail."* Both directions
+  need setting: `Version_Agent` on the version, `Agent_Version_InUse` on the agent.
+- A model is attached to the **version**, not the agent: `Version_DeployedModel`.
+- `AgentCommons.MCP` extends `AgentCommons.Tool` and binds a whole MCP server to
+  a version by **name** (`_MCPServerName`), linked through `Tool_Version`.
+  `AgentCommons.SingleMCPTool` is the one-tool-at-a-time variant, which binds by
+  association to `MCPClient.ConsumedMCPService` instead.
+- `GenAICommons.DeployedModel.Microflow` names the microflow the runtime executes
+  for that model — for the OpenAI Connector,
+  `OpenAIConnector.ChatCompletions_WithHistory_Execute`.
+- Enum spellings that will not be guessed right:
+  `ENUM_ModelSupport._True` (leading underscore), `ENUM_ToolChoice.auto`
+  (lower case), `ENUM_Agent_UsageType.Conversational` (captioned "Chat").
+
+**Verified** after boot with `mxcli oql`: agent, version (`IsDraftVersion=false`),
+MCP tool (`IsEnabled=true`), deployed model and consumed MCP service all present,
+and `Successfully ran after-startup-action`.
+
+### 41. Killing a stale runtime needs care — `pkill -f` matches its own shell
+
+Finding 34's port-in-use trap cost several boots this session. Two things make it
+worse than it sounds:
+
+- `pkill -f "mxcli run --local"` **kills the shell running it**, because the
+  shell's own command line contains the pattern. Exit code 144. Kill by PID from
+  `pgrep` instead, and use a pattern that cannot match the invocation.
+- A `kill -9` on the runtime leaves `mxbuild --serve` holding port 6543, and the
+  next run fails on *that* port instead. mxcli's message is exact about it:
+  *"That is a leftover from an earlier run that did not shut down cleanly (a
+  kill -9 or a reaped container skips mxcli's own teardown)."*
+
+Clean sequence: `for p in $(pgrep -f "mendix.running.locally"); do kill $p; done`,
+then the same for `modeler/mxbuild`, then confirm port 8080 answers `000`.

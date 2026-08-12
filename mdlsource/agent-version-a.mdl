@@ -1,0 +1,201 @@
+/**
+ * MxcliChatAgent — version A of the comparison, built on the marketplace stack.
+ *
+ * The agent is seeded as AgentCommons *runtime data* rather than as an
+ * agent-editor document: the spike (FINDINGS 29-32) established that a headless
+ * `create agent` document cannot be imported — it needs a Model document, and
+ * the only provider the importer accepts is MxCloudGenAI with a real Mendix
+ * Cloud key. AgentCommons.Agent is an ordinary entity, documented as something
+ * "Agent Admins" create in the UI, so seeding it in a startup microflow gives
+ * the same runtime object by a supported route.
+ *
+ * Everything here is create-if-absent, so a restart never duplicates rows and
+ * anything edited in the AgentCommons admin UI survives.
+ */
+
+create module "MxcliChatAgent";
+
+/**
+ * The OpenRouter connection, as an OpenAI Connector configuration.
+ *
+ * The API key is deliberately left empty — it is a secret and does not belong in
+ * this repo. Fill it in on OpenAIConnector.Configuration_Overview in the running
+ * app. IsNativeOpenAI is false because OpenRouter is OpenAI-compatible rather
+ * than OpenAI itself, which is exactly what that flag is documented for.
+ *
+ * @returns the OpenRouter configuration row
+ */
+create microflow MxcliChatAgent.SUB_Seed_Configuration ()
+returns OpenAIConnector.Configuration as $Configuration
+folder 'Seed'
+begin
+  retrieve $Existing from OpenAIConnector.Configuration
+    where DisplayName = 'OpenRouter'
+    limit 1;
+
+  if $Existing = empty then
+    $Created = create OpenAIConnector.Configuration (
+      DisplayName = 'OpenRouter',
+      ApiType = OpenAIConnector.ENUM_ApiType.OpenAI,
+      Endpoint = 'https://openrouter.ai/api/v1',
+      IsNativeOpenAI = false,
+      KeyType = OpenAIConnector.ENUM_KeyType.Bearer_Token
+    ) commit;
+    return $Created;
+  else
+    return $Existing;
+  end if;
+end;
+/
+
+/**
+ * The deployed model the agent talks to: a free OpenRouter model.
+ *
+ * Microflow names the GenAI Commons entry point the runtime executes for this
+ * model. SupportsFunctionCalling matters — MCP tool use depends on it, and 15 of
+ * OpenRouter's 16 free models support tools (FINDINGS 28).
+ *
+ * @param $Configuration the OpenRouter configuration to run against
+ * @returns the deployed model row
+ */
+create microflow MxcliChatAgent.SUB_Seed_DeployedModel (
+  $Configuration: OpenAIConnector.Configuration
+)
+returns OpenAIConnector.OpenAIDeployedModel as $DeployedModel
+folder 'Seed'
+begin
+  retrieve $Existing from OpenAIConnector.OpenAIDeployedModel
+    where DisplayName = 'OpenRouter gpt-oss-20b (free)'
+    limit 1;
+
+  if $Existing = empty then
+    $Created = create OpenAIConnector.OpenAIDeployedModel (
+      DisplayName = 'OpenRouter gpt-oss-20b (free)',
+      Architecture = 'OpenAI',
+      Model = 'openai/gpt-oss-20b:free',
+      Microflow = 'OpenAIConnector.ChatCompletions_WithHistory_Execute',
+      OutputModality = GenAICommons.ENUM_ModelModality.Text,
+      SupportsFunctionCalling = GenAICommons.ENUM_ModelSupport._True,
+      SupportsConversationsWithHistory = GenAICommons.ENUM_ModelSupport._True,
+      SupportsSystemPrompt = GenAICommons.ENUM_ModelSupport._True,
+      IsActive = true
+    );
+    change $Created (OpenAIConnector.OpenAIDeployedModel_Configuration = $Configuration) commit;
+    return $Created;
+  else
+    return $Existing;
+  end if;
+end;
+/
+
+/**
+ * Registers this app's own memory MCP server with the MCP client.
+ *
+ * The app consumes the server it publishes — the loopback is the point: it is
+ * the same protocol path a third-party server would take.
+ *
+ * @returns the consumed MCP service row
+ */
+create microflow MxcliChatAgent.SUB_Seed_McpService ()
+returns MCPClient.ConsumedMCPService as $Service
+folder 'Seed'
+begin
+  retrieve $Existing from MCPClient.ConsumedMCPService
+    where Name = 'mxclichat-memory'
+    limit 1;
+
+  if $Existing = empty then
+    $Created = create MCPClient.ConsumedMCPService (
+      Name = 'mxclichat-memory',
+      MCPEndpoint = 'http://localhost:8080/memory/mcp',
+      Version = '1.0.0',
+      ProtocolVersion = MCPClient.ENUM_ProtocolVersion.v2025_03_26,
+      ConnectionTimeOutInSeconds = 30,
+      SyncState = MCPClient.ENUM_SyncState.Not_synced
+    ) commit;
+    return $Created;
+  else
+    return $Existing;
+  end if;
+end;
+/
+
+/**
+ * The chat agent itself: an Agent, its in-use Version, and the memory MCP tool.
+ *
+ * AgentCommons versions agents. Agent_Version_InUse is what
+ * Agent_Call_WithHistory resolves — an agent with no in-use version fails at
+ * call time, so both directions of the link are set here.
+ *
+ * @param $DeployedModel the model this agent's version runs on
+ * @returns the agent
+ */
+create microflow MxcliChatAgent.SUB_Seed_Agent (
+  $DeployedModel: OpenAIConnector.OpenAIDeployedModel
+)
+returns AgentCommons.Agent as $Agent
+folder 'Seed'
+begin
+  retrieve $Existing from AgentCommons.Agent
+    where Title = 'MxcliChat Assistant'
+    limit 1;
+
+  if $Existing = empty then
+    $Created = create AgentCommons.Agent (
+      Title = 'MxcliChat Assistant',
+      Description = 'Chat assistant with a memory it can read and write over MCP.',
+      UsageType = AgentCommons.ENUM_Agent_UsageType.Conversational
+    ) commit;
+
+    $Version = create AgentCommons.Version (
+      Title = 'v1',
+      Description = 'Seeded at startup by MxcliChatAgent.',
+      VersionNumber = 1,
+      IsDraftVersion = false,
+      ToolChoice = GenAICommons.ENUM_ToolChoice.auto,
+      SystemPrompt = 'You are the assistant inside MxcliChat. You have a persistent memory reachable as MCP tools: memory_search to recall, memory_list to review, memory_add to remember something worth keeping, memory_forget to drop something. Search your memory before answering anything personal, and remember durable preferences and facts rather than asking twice.'
+    );
+    change $Version (
+      AgentCommons.Version_Agent = $Created,
+      AgentCommons.Version_DeployedModel = $DeployedModel
+    ) commit;
+    change $Created (AgentCommons.Agent_Version_InUse = $Version) commit;
+
+    $McpTool = create AgentCommons.MCP (
+      Name = 'mxclichat-memory',
+      Description = 'The app''s own memory: search, list, add and forget remembered facts.',
+      IsEnabled = true,
+      _MCPServerName = 'mxclichat-memory',
+      SyncState = MCPClient.ENUM_SyncState.Not_synced
+    );
+    change $McpTool (AgentCommons.Tool_Version = $Version) commit;
+
+    return $Created;
+  else
+    return $Existing;
+  end if;
+end;
+/
+
+/**
+ * Seeds everything version A needs, if it is not already there.
+ *
+ * Called from MxcliChatCore.ASU_MxcliChat at startup.
+ *
+ * @returns true once the agent is ready
+ */
+create microflow MxcliChatAgent.ASU_AgentSetup ()
+returns boolean as $Ready
+folder 'Seed'
+begin
+  $Configuration = call microflow MxcliChatAgent.SUB_Seed_Configuration ();
+  $DeployedModel = call microflow MxcliChatAgent.SUB_Seed_DeployedModel (
+    Configuration = $Configuration
+  );
+  $Service = call microflow MxcliChatAgent.SUB_Seed_McpService ();
+  $Agent = call microflow MxcliChatAgent.SUB_Seed_Agent (
+    DeployedModel = $DeployedModel
+  );
+  return true;
+end;
+/
