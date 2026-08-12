@@ -1,0 +1,343 @@
+/**
+ * Version B's tool loop — the part AgentCommons owns in version A.
+ *
+ * ChatContext_ChatWithHistory_ActionMicroflow_Agent does all of this there: it
+ * assembles the request from the conversation, calls the model, sees the tool
+ * calls, executes them against the MCP server, feeds the results back and calls
+ * the model again until it stops asking for tools. Version A calls it by name
+ * and never looks inside.
+ *
+ * This file also supersedes three artifacts defined in rest-version-b-tools.mdl
+ * — JSON_ChatRequest, EMM_ChatRequest and TRF_ChatRequest — because a tool loop
+ * needs two things a plain chat does not: the assistant's `tool_calls` echoed
+ * back, and a `tool_call_id` on each tool result. Both are carried as strings and
+ * put back on the wire by the transformer, exactly like the tool schemas.
+ */
+
+-- The tool call an assistant turn made, and the call a tool result answers.
+-- Stored as three plain strings rather than as a tool_calls array: the JSLT step
+-- assembles the array, so nothing in the model ever has to escape a quote.
+alter entity MxcliChatRest."RequestMessage" add attribute "ToolCallId": string(200);
+alter entity MxcliChatRest."RequestMessage" add attribute "ToolName": string(200);
+alter entity MxcliChatRest."RequestMessage" add attribute "ToolArguments": string;
+
+-- The same three, persisted, so a reopened chat can still be replayed.
+alter entity MxcliChatRest."Message" add attribute "ToolCallId": string(200);
+alter entity MxcliChatRest."Message" add attribute "ToolName": string(200);
+alter entity MxcliChatRest."Message" add attribute "ToolArguments": string;
+
+create or modify json structure MxcliChatRest.JSON_ChatRequest
+  snippet $${"model":"openai/gpt-oss-20b:free","messages":[{"role":"user","content":"Hello.","tool_call_id":"call_1","tool_name":"memory_search","tool_arguments":"{}"}],"tools":[{"name":"memory_search","description":"Search stored memories.","parameters":"{}"}]}$$;
+/
+
+create or modify export mapping MxcliChatRest.EMM_ChatRequest
+  with json structure MxcliChatRest.JSON_ChatRequest
+{
+  MxcliChatRest.RequestRoot {
+    model = ModelId,
+    MxcliChatRest.RequestMessages_RequestRoot/MxcliChatRest.RequestMessages as messages {
+      MxcliChatRest.RequestMessage_RequestMessages/MxcliChatRest.RequestMessage as MessagesItem {
+        role = Role,
+        content = Content,
+        tool_call_id = ToolCallId,
+        tool_name = ToolName,
+        tool_arguments = ToolArguments
+      }
+    },
+    MxcliChatRest.RequestTools_RequestRoot/MxcliChatRest.RequestTools as tools {
+      MxcliChatRest.ToolDefinition_RequestTools/MxcliChatRest.ToolDefinition as ToolsItem {
+        name = ToolName,
+        description = Description,
+        parameters = SchemaJson
+      }
+    }
+  }
+};
+/
+
+/**
+ * Flat mapping output -> the request OpenRouter expects.
+ *
+ * The message branch is per role rather than one object with optional keys, and
+ * that is deliberate: Mendix's JSLT keeps null-valued keys (FINDINGS 51), so a
+ * single shape would put `"tool_call_id": null` on every ordinary message. Three
+ * branches emit only the keys each role actually has.
+ *
+ * The assistant branch is where the transformer stops being a convenience and
+ * starts being the reason this works at all. The model's `arguments` are a JSON
+ * string that has to appear *quoted* inside the request — build that by
+ * concatenation and every quote in it needs escaping, in an expression language
+ * with no JSON encoder. Handing JSLT the raw string and letting it serialise the
+ * value costs nothing and cannot be got wrong.
+ */
+create or modify data transformer MxcliChatRest.TRF_ChatRequest
+  source json '{"model":"openai/gpt-oss-20b:free","messages":[{"role":"user","content":"Hello.","tool_call_id":"call_1","tool_name":"memory_search","tool_arguments":"{}"}],"tools":[{"name":"memory_search","description":"Search stored memories.","parameters":"{}"}]}'
+{
+  JSLT $$
+{
+  "model": .model,
+  "messages": [for (.messages)
+    if (.role == "tool")
+      {"role": "tool", "tool_call_id": .tool_call_id, "content": .content}
+    else if (.tool_name)
+      {
+        "role": .role,
+        "content": .content,
+        "tool_calls": [
+          {
+            "id": .tool_call_id,
+            "type": "function",
+            "function": {"name": .tool_name, "arguments": .tool_arguments}
+          }
+        ]
+      }
+    else
+      {"role": .role, "content": .content}
+  ],
+  "tools": [for (.tools)
+    {
+      "type": "function",
+      "function": {
+        "name": .name,
+        "description": .description,
+        "parameters": from-json(.parameters)
+      }
+    }
+  ]
+}
+  $$;
+};
+/
+
+/**
+ * Builds one request from a chat's history and the MCP server's tools.
+ *
+ * @param $Chat the conversation
+ * @param $SessionId an open MCP session
+ * @returns the request root, with its messages and tools attached
+ */
+create or modify microflow MxcliChatRest.SUB_Chat_BuildRequest (
+  $Chat: MxcliChatRest.Chat,
+  $SessionId: string
+)
+returns MxcliChatRest.RequestRoot as $Root
+folder 'Chat'
+begin
+  @position(0, 100)
+  $Root = create MxcliChatRest.RequestRoot (ModelId = @MxcliChatRest.OpenRouterModel);
+
+  @position(200, 100)
+  $Messages = create MxcliChatRest.RequestMessages (
+    MxcliChatRest.RequestMessages_RequestRoot = $Root
+  );
+
+  @position(400, 100)
+  retrieve $History from MxcliChatRest.Message
+    where [MxcliChatRest.Message_Chat = $Chat]
+    sort by MxcliChatRest.Message.SequenceNumber asc;
+
+  @position(600, 100)
+  loop $Turn in $History
+  begin
+    @position(700, 200)
+    $Line = create MxcliChatRest.RequestMessage (
+      Role = toLowerCase(getCaption($Turn/Role)),
+      Content = $Turn/Content,
+      ToolCallId = $Turn/ToolCallId,
+      ToolName = $Turn/ToolName,
+      ToolArguments = $Turn/ToolArguments,
+      Ordinal = $Turn/SequenceNumber,
+      MxcliChatRest.RequestMessage_RequestMessages = $Messages
+    );
+  end loop;
+
+  @position(900, 100)
+  $Tools = create MxcliChatRest.RequestTools (
+    MxcliChatRest.RequestTools_RequestRoot = $Root
+  );
+
+  @position(1100, 100)
+  $ToolList = call microflow MxcliChatRest.SUB_Mcp_ListTools (SessionId = $SessionId);
+
+  @position(1300, 100)
+  retrieve $McpTools from $ToolList/MxcliChatRest.McpTool_McpToolList;
+
+  @position(1500, 100)
+  loop $McpTool in $McpTools
+  begin
+    @position(1600, 200)
+    $Offered = create MxcliChatRest.ToolDefinition (
+      ToolName = $McpTool/ToolName,
+      Description = $McpTool/Description,
+      SchemaJson = $McpTool/SchemaJson,
+      MxcliChatRest.ToolDefinition_RequestTools = $Tools
+    );
+  end loop;
+
+  @position(1800, 100)
+  return $Root;
+end;
+/
+
+/**
+ * Appends one turn to a chat.
+ *
+ * @param $Chat the conversation
+ * @param $Role who is speaking
+ * @param $Content what was said
+ * @param $ToolCallId the call this answers, or the call this turn makes
+ * @param $ToolName the tool an assistant turn asked for
+ * @param $ToolArguments that tool's arguments, exactly as the model wrote them
+ * @returns the stored message
+ */
+create or modify microflow MxcliChatRest.SUB_Chat_AddMessage (
+  $Chat: MxcliChatRest.Chat,
+  $Role: MxcliChatRest.ENUM_MessageRole,
+  $Content: string,
+  $ToolCallId: string,
+  $ToolName: string,
+  $ToolArguments: string
+)
+returns MxcliChatRest.Message as $Message
+folder 'Chat'
+begin
+  @position(0, 100)
+  retrieve $Existing from MxcliChatRest.Message
+    where [MxcliChatRest.Message_Chat = $Chat];
+
+  @position(150, 100)
+  $Position = count($Existing);
+
+  @position(200, 100)
+  $Message = create MxcliChatRest.Message (
+    Role = $Role,
+    Content = $Content,
+    ToolCallId = $ToolCallId,
+    ToolName = $ToolName,
+    ToolArguments = $ToolArguments,
+    SequenceNumber = $Position + 1,
+    CreatedAt = [%CurrentDateTime%],
+    MxcliChatRest.Message_Chat = $Chat
+  ) commit;
+
+  @position(400, 100)
+  change $Chat (LastMessageAt = [%CurrentDateTime%]) commit;
+
+  @position(600, 100)
+  return $Message;
+end;
+/
+
+/**
+ * The loop itself: ask, execute whatever tools come back, ask again.
+ *
+ * Bounded at four rounds. An unbounded loop is a liveness bug waiting for a
+ * model that keeps asking for the same tool, and the bound is the cheapest
+ * possible answer to it.
+ *
+ * @param $Chat the conversation, with the user's turn already appended
+ * @returns the assistant's final answer
+ */
+create or modify microflow MxcliChatRest.ACT_Chat_Respond (
+  $Chat: MxcliChatRest.Chat
+)
+returns string as $Answer
+folder 'Chat'
+begin
+  @position(0, 100)
+  declare $Answer string = '';
+
+  @position(200, 100)
+  declare $Round integer = 0;
+
+  @position(400, 100)
+  declare $Done boolean = false;
+
+  @position(600, 100)
+  $SessionId = call microflow MxcliChatRest.SUB_Mcp_Initialize ();
+
+  @position(800, 100)
+  while $Round < 4 and $Done = false
+  begin
+    @position(900, 200)
+    set $Round = $Round + 1;
+
+    @position(1000, 200)
+    $Root = call microflow MxcliChatRest.SUB_Chat_BuildRequest (
+      Chat = $Chat,
+      SessionId = $SessionId
+    );
+
+    @position(1200, 200)
+    $Response = call microflow MxcliChatRest.SUB_OpenRouter_Complete (RequestRoot = $Root);
+
+    @position(1400, 200)
+    retrieve $Choices from $Response/MxcliChatRest.CompletionChoice_CompletionResponse;
+
+    @position(1600, 200)
+    loop $Choice in $Choices
+    begin
+      @position(1700, 300)
+      retrieve $ToolCalls from $Choice/MxcliChatRest.CompletionToolCall_CompletionChoice;
+
+      -- count() is an aggregate activity, not an expression function: using it
+      -- inside the decision builds as CE0117 "Error(s) in expression".
+      @position(1800, 300)
+      $ToolCallCount = count($ToolCalls);
+
+      @position(1900, 300)
+      if $ToolCallCount = 0 then
+        @position(2000, 400)
+        set $Answer = $Choice/Content;
+        @position(2200, 400)
+        set $Done = true;
+        @position(2400, 400)
+        $Stored = call microflow MxcliChatRest.SUB_Chat_AddMessage (
+          Chat = $Chat,
+          Role = MxcliChatRest.ENUM_MessageRole.Assistant,
+          Content = $Choice/Content,
+          ToolCallId = '',
+          ToolName = '',
+          ToolArguments = ''
+        );
+      end if;
+
+      @position(2000, 600)
+      loop $ToolCall in $ToolCalls
+      begin
+        -- The assistant's turn has to be echoed back before its results, or the
+        -- next request has tool messages answering a call the model never made.
+        @position(2300, 700)
+        $AssistantTurn = call microflow MxcliChatRest.SUB_Chat_AddMessage (
+          Chat = $Chat,
+          Role = MxcliChatRest.ENUM_MessageRole.Assistant,
+          Content = '',
+          ToolCallId = $ToolCall/CallId,
+          ToolName = $ToolCall/ToolName,
+          ToolArguments = $ToolCall/ArgumentsJson
+        );
+
+        @position(2500, 700)
+        $ToolResult = call microflow MxcliChatRest.SUB_Mcp_CallTool (
+          SessionId = $SessionId,
+          ToolName = $ToolCall/ToolName,
+          ArgumentsJson = $ToolCall/ArgumentsJson
+        );
+
+        @position(2700, 700)
+        $ToolTurn = call microflow MxcliChatRest.SUB_Chat_AddMessage (
+          Chat = $Chat,
+          Role = MxcliChatRest.ENUM_MessageRole.Tool,
+          Content = $ToolResult/Text,
+          ToolCallId = $ToolCall/CallId,
+          ToolName = '',
+          ToolArguments = ''
+        );
+      end loop;
+    end loop;
+  end while;
+
+  @position(2900, 100)
+  return $Answer;
+end;
+/
