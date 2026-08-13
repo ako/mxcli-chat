@@ -1,0 +1,141 @@
+/**
+ * Removing the three Java bridges — mxcli can now pass a microflow.
+ *
+ * FINDINGS 36 and 42 were the same defect hit in two modules: a Java action whose
+ * parameter is microflow-typed could not be called from MDL, because mxcli sent a
+ * String where the model expected a Microflows$MicroflowParameterValue, and the
+ * build refused it:
+ *
+ *   [CE0115] "The arguments that are passed to Java action
+ *   'AgentCommons.ChatContext_Create_ForAgent' do not match the expected
+ *   parameters and need to be refreshed."
+ *
+ * The workaround was a per-module Java action taking the microflow's name as a
+ * string and calling the real action from Java. Three of them: two for the MCP
+ * Server module, one for AgentCommons.
+ *
+ * mxcli `074c6e19` reads the parameter as a microflow (FINDINGS 60), so the
+ * bridges are dead weight. Removing them takes 40 lines of Java out of the app
+ * and lets the calls say what they mean — `ExecutingMicroflow =
+ * MxcliChatCore.MCP_Memory_Search` rather than a string that nothing validates.
+ *
+ * Worth noting what the bridges cost beyond their line count: a microflow name
+ * passed as a string is not a reference, so renaming a tool microflow would have
+ * broken registration at runtime with nothing failing at build time.
+ *
+ * This file is the migration that was applied to the existing .mpr. The scripts
+ * that build the app from scratch — core-mcp-server.mdl and
+ * agent-version-a-provider.mdl — now pass microflow references directly, and the
+ * two files that defined the bridges are deleted, so a fresh replay never creates
+ * them. Replaying this file on a bridge-free project fails on its three DROPs,
+ * which is correct: there is nothing left to drop.
+ */
+
+/**
+ * Registers the memory MCP server and its four tools.
+ *
+ * Called at startup. The server is reachable at <app url>/memory/mcp; each
+ * tool's JSON schema is derived from its executing microflow's parameters —
+ * Schema is left empty, which is what the module documents as "extract it from
+ * the microflow".
+ *
+ * @returns true once the server is registered
+ */
+create or modify microflow MxcliChatCore.SUB_McpServer_Register ()
+returns Boolean as $Registered
+folder 'MCP Server'
+begin
+  @position(360, 200)
+  $Server = call java action MCPServer.CreateMCPServer (
+    Path = 'memory',
+    Name = 'mxclichat-memory',
+    Version = '1.0.0',
+    ProtocolVersion = MCPServer.ENUM_ProtocolVersion.v2025_03_26,
+    -- The closing paren is on this line on purpose: a microflow-typed argument
+    -- that is LAST in the list swallows the newline after it, and the build then
+    -- reports CE1613 "The selected microflow 'MxcliChatCore.SUB_Mcp_Authorize\n'
+    -- no longer exists" (FINDINGS 63).
+    AuthenticationMicroflow = MxcliChatCore.SUB_Mcp_Authorize);
+
+  @position(520, 200)
+  $ToolSearch = call java action MCPServer.AddTool (
+    McpServer = $Server,
+    Name = 'memory_search',
+    Description = 'Search remembered facts, preferences and instructions by phrase. Returns matching memories with their numbers.',
+    ExecutingMicroflow = MxcliChatCore.MCP_Memory_Search,
+    Schema = empty
+  );
+
+  @position(680, 200)
+  $ToolList = call java action MCPServer.AddTool (
+    McpServer = $Server,
+    Name = 'memory_list',
+    Description = 'List everything currently remembered, newest first.',
+    ExecutingMicroflow = MxcliChatCore.MCP_Memory_List,
+    Schema = empty
+  );
+
+  @position(840, 200)
+  $ToolAdd = call java action MCPServer.AddTool (
+    McpServer = $Server,
+    Name = 'memory_add',
+    Description = 'Remember one thing. Kind is fact, preference or instruction.',
+    ExecutingMicroflow = MxcliChatCore.MCP_Memory_Add,
+    Schema = empty
+  );
+
+  @position(1000, 200)
+  $ToolForget = call java action MCPServer.AddTool (
+    McpServer = $Server,
+    Name = 'memory_forget',
+    Description = 'Forget one memory, by the number that memory_search and memory_list report.',
+    ExecutingMicroflow = MxcliChatCore.MCP_Memory_Forget,
+    Schema = empty
+  );
+
+  @position(1160, 200)
+  return true;
+end;
+
+grant execute on microflow MxcliChatCore.SUB_McpServer_Register to MxcliChatCore.User;
+/
+
+/**
+ * Opens a new chat against the seeded agent.
+ *
+ * ChatContext_Create_ForAgent resolves the agent's in-use version, its deployed
+ * model and its tools — including the memory MCP server — and creates the
+ * provider config the chat dispatches through. Nothing about the model or the
+ * tool list is repeated here.
+ *
+ * The action microflow is ConversationalUI's own, and it is now a real reference
+ * rather than a string (FINDINGS 43 explains why the *other* one, the Agent
+ * Builder's test chat, is the wrong choice).
+ */
+create or modify microflow MxcliChatAgent.ACT_Chat_Open ()
+folder 'Pages'
+begin
+  @position(0, 100)
+  retrieve $Agent from AgentCommons.Agent
+    where Title = 'MxcliChat Assistant'
+    limit 1;
+
+  @position(200, 100)
+  $ChatContext = call java action AgentCommons.ChatContext_Create_ForAgent (
+    Agent = $Agent,
+    ActionMicroflow = ConversationalUI.ChatContext_ChatWithHistory_ActionMicroflow_Agent,
+    ContextObject = empty,
+    OverwritingDeployedModel = empty
+  );
+
+  @position(400, 100)
+  show page MxcliChatAgent.Chat_Agent ($ChatContext = $ChatContext);
+
+  @position(600, 100)
+  return;
+end;
+/
+
+drop java action MxcliChatAgent.JA_ChatContext_CreateForAgent;
+drop java action MxcliChatCore.JA_McpServer_AddTool;
+drop java action MxcliChatCore.JA_McpServer_Create;

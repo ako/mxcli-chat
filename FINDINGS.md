@@ -1277,3 +1277,178 @@ The model did not call the memory tools, and its description of mxcli was
 confidently wrong — `.mdl` folders, `mendix build`, a `mendix/mxcli` Docker
 image, none of which exist. Worth remembering when reading the comparison: both
 versions are being judged on plumbing, not on what a free model says.
+
+## 2026-08-13 — where the time goes in a module update
+
+### 59. Half of every update is the local-edit baseline, and `--force` does not skip it
+
+Measured on **Administration** (23513), the smallest module in the project — 21
+elements, a 0.3 MB package. Every figure is a single run on this container:
+
+| Step | Time |
+|---|---|
+| `marketplace download` (package only) | **5.3 s** |
+| `mx create-project` (blank reference app) | **11.9 s** |
+| `mx module-import` (one module into it) | **7.4 s** |
+| `marketplace diff --to 4.5.0` | **69.5 s** |
+| `marketplace update 4.5.0 → 4.4.0` | **67.5 s** |
+| `marketplace update 4.4.0 → 4.5.0` | **66.6 s** |
+
+A minute per module, and almost none of it is the download.
+
+`referenceFor` (cmd_marketplace_diff.go:205) is what costs: for each version it
+downloads the `.mpk`, then calls `PackageProject`, which runs `mx create-project`
+to build a **whole blank Mendix app**, drops the template's copy of the module,
+and `mx module-import`s the published one — so the comparison runs against a real
+project rather than against the package. That is ~25 s per reference before any
+comparing happens, and `mx` alone costs ~5 s of process startup per invocation
+(a `module-import` that fails on a bad argument still takes 5.2 s).
+
+`update` calls it **twice**: once as `"base"` — the version currently installed,
+built solely to answer "has anyone edited this module?" — and once as `"target"`.
+That is why `diff` and `update` cost the same: both build two references.
+
+**The base reference is built unconditionally, before the gate that consumes it:**
+
+```go
+baseRef, basePkgModule, err := referenceFor(ctx, client, base, mendixVersion, work, "base")
+…
+drift := marketplace.Compare(installed, published)
+…
+if err := gateOnLocalEdits(out, drift, force, saveEdits); err != nil {
+```
+
+So `--force` — which means "I know local edits will be discarded, proceed" —
+still pays for the baseline it has already decided to ignore. On a fresh
+provisioning run, where nothing has been edited by definition, that is about
+**30 s of every 67 s**, or ~3 minutes of the ~7 this project's six modules take.
+
+Two changes would pay for themselves:
+
+1. **Skip the base reference when `--force` is set** and no `--save-edits` is
+   requested. The information is being computed and thrown away.
+2. **Cache the reference project per (content-id, version, Mendix version).**
+   Today every invocation rebuilds a blank app from scratch; the same base
+   reference is rebuilt on `diff` and again on the `update` that follows it.
+
+A `--no-baseline` flag would close finding 15 as well: NanoflowCommons 6.0.0 is
+unbuildable as a baseline because that version was unpublished, and there is no
+way to say "I accept that you cannot tell, update anyway."
+
+Method note: the timing round-trip (4.5.0 → 4.4.0 → 4.5.0) left the project at
+the same module version but with 11 CE0463s — the widget-definition damage from
+finding 13, which the update's own output predicts and tells you to repair. The
+model was restored with `git checkout` rather than repaired, and the update also
+drops a `…READMEOSS….html` licence file in the repo root, which is worth
+gitignoring if these become routine.
+
+## 2026-08-13 — re-verified against `ako/mxcli` main @ `074c6e19`
+
+3002 commits ahead of the `d762d2e` build everything above was found on. Each
+row below was re-tested on this project, not read off a commit message.
+
+| # | Finding | Status on 074c6e19 |
+|---|---|---|
+| 15 | NanoflowCommons 6.0.0 unbuildable as a baseline | **fixed** — `--no-baseline` exists; the module is now 7.2.1 |
+| 36/42 | CE0115 on a microflow-typed Java action parameter | **fixed** |
+| 55 | `log … with ()` segfaults mxcli | **fixed** — now a clean syntax error |
+| 59 | Reference project rebuilt every time | **fixed** — cached; `diff` 69.5 s → 37.2 s cold, **15.2 s warm** |
+| 16 | `diff` invents local edits | **improved** — Atlas_Core now flags 1 of 35, was more |
+| 49 | `transform … on error continue` builds then fails | **open** — `mxcli check` still passes it, mxbuild still rejects it (now CE6035) |
+| 50 | `source json $$…$$` does not parse | **open** |
+| 53 | REST call URL/body: a bare expression is stored as literal text | **open** |
+| 54 | Import mapping fails at runtime with an empty XML path | **open** |
+
+### 60. Finding 54 survives a full rebuild of both artifacts on the newest main
+
+The strongest version of the repro. On 074c6e19, with **both** the JSON structure
+and the import mapping dropped and recreated by the new binary, over an entity
+with eight plain string attributes and no arrays or associations anywhere:
+
+```
+com.mendix.modules.microflowengine.MicroflowException: key not found: Path(QName(None,),None,)
+  at MxcliChatRest.PROBE_Import (Import with mapping : 'Import from JSON')
+```
+
+`mx check` reports 0 errors. `IMM_McpToolList` — root object with no value
+mappings, one array child — imports fine in the same boot. So neither
+`7e35905a` ("resolve JSON members by either name, and stop inventing paths") nor
+`0ed74ab2` ("stop copying the JSON snippet's sample value onto mapping elements")
+covers this case, and the flat-shape workaround in version B stays.
+
+### 61. Three new things that change how this project should be run
+
+**`--constant Module.Name=value`** on `mxcli run` sets a constant for one run
+only, never written to the project. That replaces the whole admin-port dance in
+finding 57 for the OpenRouter key:
+
+```bash
+mxcli run --local -p MxcliChat.mpr --constant "MxcliChatRest.OpenRouterApiKey=$OPENROUTER_KEY"
+```
+
+There is also a machine-local constant store for secrets that must not be
+committed, and `--configuration` to pick which configuration's constants a run
+uses — which is the other half of finding 33.
+
+**`--no-baseline`** skips the local-edit check, and with it the reference build
+that costs half of every update. NanoflowCommons 6.0.0 → 7.2.1 took 26 s.
+
+**Reference projects are cached** between invocations, so a `diff` followed by
+the `update` it justifies no longer builds the same blank app twice.
+
+### 62. The stack is finally fully current
+
+NanoflowCommons was the last stale module (finding 15). After
+`marketplace update 109515 --module NanoflowCommons --to 7.2.1 --no-baseline`
+and `mxcli fix widgets`: **7.2.1**, `mx check` 0 errors, 2227 `.mxunit` files
+unchanged — MPR v2 preserved, exactly as finding 13 requires.
+
+### 63. A microflow-typed argument that is last in the list swallows the newline
+
+Found while removing the bridges finding 60 made unnecessary. This builds:
+
+```mdl
+ExecutingMicroflow = MxcliChatCore.MCP_Memory_Search,
+Schema = empty
+);
+```
+
+and this does not:
+
+```mdl
+AuthenticationMicroflow = MxcliChatCore.SUB_Mcp_Authorize
+);
+```
+
+```
+[CE1613] "The selected microflow 'MxcliChatCore.SUB_Mcp_Authorize
+  ' no longer exists." at Call Java action activity 'Create MCP Server'
+```
+
+The reference is stored with the trailing newline and indentation included, so
+it resolves to nothing. Only the **last** argument is affected — anything
+followed by a comma is fine. `mxcli check --references` passes either way; the
+build catches it, and the error text gives it away by wrapping mid-quote.
+
+Workaround: close the paren on the same line as the last argument, or put a
+comma-terminated argument after it.
+
+### 64. Both bridges removed, verified at runtime
+
+`SUB_McpServer_Register` now calls `MCPServer.CreateMCPServer` and
+`MCPServer.AddTool` directly, and `ACT_Chat_Open` calls
+`AgentCommons.ChatContext_Create_ForAgent` directly. Three Java actions and
+~40 lines of Java are gone from the app.
+
+Verified on a running app, not just at build time:
+
+- `tools/list` over the memory endpoint returns all four tools —
+  `memory_search`, `memory_list`, `memory_add`, `memory_forget` — so both the
+  server creation and every tool registration work through direct calls;
+- version A's chat page opens and renders ConversationalUI's composer, so
+  `ChatContext_Create_ForAgent` works with a real microflow reference.
+
+The gain is not only line count. A microflow passed as a string was not a
+reference: renaming `MCP_Memory_Search` would have left registration compiling
+and failing at runtime. Now it is a model reference, and the rename would be
+caught — or carried — by the tooling.
