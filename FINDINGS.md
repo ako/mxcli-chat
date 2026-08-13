@@ -1341,3 +1341,64 @@ finding 13, which the update's own output predicts and tells you to repair. The
 model was restored with `git checkout` rather than repaired, and the update also
 drops a `…READMEOSS….html` licence file in the repo root, which is worth
 gitignoring if these become routine.
+
+## 2026-08-13 — re-verified against `ako/mxcli` main @ `074c6e19`
+
+3002 commits ahead of the `d762d2e` build everything above was found on. Each
+row below was re-tested on this project, not read off a commit message.
+
+| # | Finding | Status on 074c6e19 |
+|---|---|---|
+| 15 | NanoflowCommons 6.0.0 unbuildable as a baseline | **fixed** — `--no-baseline` exists; the module is now 7.2.1 |
+| 36/42 | CE0115 on a microflow-typed Java action parameter | **fixed** |
+| 55 | `log … with ()` segfaults mxcli | **fixed** — now a clean syntax error |
+| 59 | Reference project rebuilt every time | **fixed** — cached; `diff` 69.5 s → 37.2 s cold, **15.2 s warm** |
+| 16 | `diff` invents local edits | **improved** — Atlas_Core now flags 1 of 35, was more |
+| 49 | `transform … on error continue` builds then fails | **open** — `mxcli check` still passes it, mxbuild still rejects it (now CE6035) |
+| 50 | `source json $$…$$` does not parse | **open** |
+| 53 | REST call URL/body: a bare expression is stored as literal text | **open** |
+| 54 | Import mapping fails at runtime with an empty XML path | **open** |
+
+### 60. Finding 54 survives a full rebuild of both artifacts on the newest main
+
+The strongest version of the repro. On 074c6e19, with **both** the JSON structure
+and the import mapping dropped and recreated by the new binary, over an entity
+with eight plain string attributes and no arrays or associations anywhere:
+
+```
+com.mendix.modules.microflowengine.MicroflowException: key not found: Path(QName(None,),None,)
+  at MxcliChatRest.PROBE_Import (Import with mapping : 'Import from JSON')
+```
+
+`mx check` reports 0 errors. `IMM_McpToolList` — root object with no value
+mappings, one array child — imports fine in the same boot. So neither
+`7e35905a` ("resolve JSON members by either name, and stop inventing paths") nor
+`0ed74ab2` ("stop copying the JSON snippet's sample value onto mapping elements")
+covers this case, and the flat-shape workaround in version B stays.
+
+### 61. Three new things that change how this project should be run
+
+**`--constant Module.Name=value`** on `mxcli run` sets a constant for one run
+only, never written to the project. That replaces the whole admin-port dance in
+finding 57 for the OpenRouter key:
+
+```bash
+mxcli run --local -p MxcliChat.mpr --constant "MxcliChatRest.OpenRouterApiKey=$OPENROUTER_KEY"
+```
+
+There is also a machine-local constant store for secrets that must not be
+committed, and `--configuration` to pick which configuration's constants a run
+uses — which is the other half of finding 33.
+
+**`--no-baseline`** skips the local-edit check, and with it the reference build
+that costs half of every update. NanoflowCommons 6.0.0 → 7.2.1 took 26 s.
+
+**Reference projects are cached** between invocations, so a `diff` followed by
+the `update` it justifies no longer builds the same blank app twice.
+
+### 62. The stack is finally fully current
+
+NanoflowCommons was the last stale module (finding 15). After
+`marketplace update 109515 --module NanoflowCommons --to 7.2.1 --no-baseline`
+and `mxcli fix widgets`: **7.2.1**, `mx check` 0 errors, 2227 `.mxunit` files
+unchanged — MPR v2 preserved, exactly as finding 13 requires.
