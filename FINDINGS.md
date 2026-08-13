@@ -1277,3 +1277,67 @@ The model did not call the memory tools, and its description of mxcli was
 confidently wrong — `.mdl` folders, `mendix build`, a `mendix/mxcli` Docker
 image, none of which exist. Worth remembering when reading the comparison: both
 versions are being judged on plumbing, not on what a free model says.
+
+## 2026-08-13 — where the time goes in a module update
+
+### 59. Half of every update is the local-edit baseline, and `--force` does not skip it
+
+Measured on **Administration** (23513), the smallest module in the project — 21
+elements, a 0.3 MB package. Every figure is a single run on this container:
+
+| Step | Time |
+|---|---|
+| `marketplace download` (package only) | **5.3 s** |
+| `mx create-project` (blank reference app) | **11.9 s** |
+| `mx module-import` (one module into it) | **7.4 s** |
+| `marketplace diff --to 4.5.0` | **69.5 s** |
+| `marketplace update 4.5.0 → 4.4.0` | **67.5 s** |
+| `marketplace update 4.4.0 → 4.5.0` | **66.6 s** |
+
+A minute per module, and almost none of it is the download.
+
+`referenceFor` (cmd_marketplace_diff.go:205) is what costs: for each version it
+downloads the `.mpk`, then calls `PackageProject`, which runs `mx create-project`
+to build a **whole blank Mendix app**, drops the template's copy of the module,
+and `mx module-import`s the published one — so the comparison runs against a real
+project rather than against the package. That is ~25 s per reference before any
+comparing happens, and `mx` alone costs ~5 s of process startup per invocation
+(a `module-import` that fails on a bad argument still takes 5.2 s).
+
+`update` calls it **twice**: once as `"base"` — the version currently installed,
+built solely to answer "has anyone edited this module?" — and once as `"target"`.
+That is why `diff` and `update` cost the same: both build two references.
+
+**The base reference is built unconditionally, before the gate that consumes it:**
+
+```go
+baseRef, basePkgModule, err := referenceFor(ctx, client, base, mendixVersion, work, "base")
+…
+drift := marketplace.Compare(installed, published)
+…
+if err := gateOnLocalEdits(out, drift, force, saveEdits); err != nil {
+```
+
+So `--force` — which means "I know local edits will be discarded, proceed" —
+still pays for the baseline it has already decided to ignore. On a fresh
+provisioning run, where nothing has been edited by definition, that is about
+**30 s of every 67 s**, or ~3 minutes of the ~7 this project's six modules take.
+
+Two changes would pay for themselves:
+
+1. **Skip the base reference when `--force` is set** and no `--save-edits` is
+   requested. The information is being computed and thrown away.
+2. **Cache the reference project per (content-id, version, Mendix version).**
+   Today every invocation rebuilds a blank app from scratch; the same base
+   reference is rebuilt on `diff` and again on the `update` that follows it.
+
+A `--no-baseline` flag would close finding 15 as well: NanoflowCommons 6.0.0 is
+unbuildable as a baseline because that version was unpublished, and there is no
+way to say "I accept that you cannot tell, update anyway."
+
+Method note: the timing round-trip (4.5.0 → 4.4.0 → 4.5.0) left the project at
+the same module version but with 11 CE0463s — the widget-definition damage from
+finding 13, which the update's own output predicts and tells you to repair. The
+model was restored with `git checkout` rather than repaired, and the update also
+drops a `…READMEOSS….html` licence file in the repo root, which is worth
+gitignoring if these become routine.
