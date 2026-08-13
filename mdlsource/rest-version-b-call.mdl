@@ -13,10 +13,12 @@
  *   - `choices[].message` is lifted into the choice;
  *   - `tool_calls[].function` is flattened into the tool call.
  *
- * A response with no tool calls yields `"tool_calls": null` rather than `[]`:
- * JSLT's fallback() treats an empty array as empty and falls through to null,
- * and Mendix's JSLT keeps null-valued keys (FINDINGS 51). The import mapping
- * simply creates no children for it.
+ * The empty case emits `[]` explicitly. `fallback(.message.tool_calls, [])` does
+ * not: JSLT's fallback treats an empty array as empty and falls through to null,
+ * Mendix's JSLT then keeps the null-valued key, and the importer cannot descend a
+ * null where it expects an array — it fails with
+ *   java.util.NoSuchElementException: key not found: Path(QName(None,),None,)
+ * which names neither the mapping element nor the key that was null (FINDINGS 54).
  *
  * `arguments` is left exactly as it arrives. The API sends the model's arguments
  * as an escaped JSON *string*, so this is the one piece of arbitrary JSON in the
@@ -27,7 +29,7 @@ create data transformer MxcliChatRest.TRF_ChatCompletion
 {
   JSLT $$
 {
-  "id": .id,
+  "completion_id": .id,
   "model": .model,
   "choices": [for (.choices)
     {
@@ -35,13 +37,15 @@ create data transformer MxcliChatRest.TRF_ChatCompletion
       "finish_reason": .finish_reason,
       "role": .message.role,
       "content": .message.content,
-      "tool_calls": [for (fallback(.message.tool_calls, []))
-        {
-          "id": .id,
-          "name": .function.name,
-          "arguments": .function.arguments
-        }
-      ]
+      "tool_calls": if (.message.tool_calls)
+        [for (.message.tool_calls)
+          {
+            "call_id": .id,
+            "name": .function.name,
+            "arguments": .function.arguments
+          }
+        ]
+      else []
     }
   ]
 }
@@ -76,15 +80,23 @@ begin
   declare $Url string = @MxcliChatRest.OpenRouterBaseUrl + '/chat/completions';
 
   @position(400, 100)
-  $Raw = rest call post $Url
+  $Raw = rest call post '{1}' with ({1} = $Url)
     header 'Content-Type' = 'application/json'
     header 'Authorization' = 'Bearer ' + @MxcliChatRest.OpenRouterApiKey
-    body $Body
+    body '{1}' with ({1} = $Body)
     timeout 120
     returns string;
 
+  -- Logged because the provider's exact response is the only way to see what a
+  -- free model actually returns — the browser shows a generic error dialog.
+  @position(500, 100)
+  log info node 'OpenRouter' 'RAW>>>{1}<<<' with ({1} = $Raw);
+
   @position(600, 100)
   $Flat = transform $Raw with MxcliChatRest.TRF_ChatCompletion;
+
+  @position(700, 100)
+  log info node 'OpenRouter' 'FLAT>>>{1}<<<' with ({1} = $Flat);
 
   @position(800, 100)
   $Response = import from mapping MxcliChatRest.IMM_ChatCompletion($Flat);

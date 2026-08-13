@@ -97,17 +97,20 @@ begin
   @position(0, 100)
   declare $SessionId string = '';
 
-  -- A literal body is read as a *template*, and `{` starts a placeholder in one:
-  -- CE0712 "Brace should be followed by a number of digits or another brace."
-  -- Any JSON body therefore has to arrive as an expression, not a literal.
+  -- Both the URL and the body of a REST call activity are *templates*, and a
+  -- bare expression in either position is stored as literal text — the runtime
+  -- then POSTs to the string "@MxcliChatRest.McpEndpointUrl" and fails with
+  -- org.apache.http.ProtocolException: Target host is not specified. The
+  -- parameterised form is the only one that evaluates (FINDINGS 53). It is also
+  -- why a JSON body cannot be a literal: `{` opens a placeholder (CE0712).
   @position(200, 100)
   declare $InitBody string = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"MxcliChatRest","version":"1.0.0"}}}';
 
   @position(400, 100)
-  $Response = rest call post @MxcliChatRest.McpEndpointUrl
+  $Response = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
     header 'Content-Type' = 'application/json'
     header 'Accept' = 'application/json, text/event-stream'
-    body $InitBody
+    body '{1}' with ({1} = $InitBody)
     timeout 60
     returns response;
 
@@ -130,11 +133,11 @@ begin
   @position(1050, 100)
   if $SessionId != '' then
     @position(1100, 200)
-    $Ack = rest call post @MxcliChatRest.McpEndpointUrl
+    $Ack = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
       header 'Content-Type' = 'application/json'
       header 'Accept' = 'application/json, text/event-stream'
       header 'Mcp-Session-Id' = $SessionId
-      body $AckBody
+      body '{1}' with ({1} = $AckBody)
       timeout 60
       returns string;
   end if;
@@ -166,11 +169,11 @@ begin
   declare $ListBody string = '{"jsonrpc":"2.0","id":2,"method":"tools/list"}';
 
   @position(100, 100)
-  $Raw = rest call post @MxcliChatRest.McpEndpointUrl
+  $Raw = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
     header 'Content-Type' = 'application/json'
     header 'Accept' = 'application/json, text/event-stream'
     header 'Mcp-Session-Id' = $SessionId
-    body $ListBody
+    body '{1}' with ({1} = $ListBody)
     timeout 60
     returns string;
 
@@ -219,11 +222,11 @@ begin
     + $ToolName + '","arguments":' + $Arguments + '}}';
 
   @position(400, 100)
-  $Raw = rest call post @MxcliChatRest.McpEndpointUrl
+  $Raw = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
     header 'Content-Type' = 'application/json'
     header 'Accept' = 'application/json, text/event-stream'
     header 'Mcp-Session-Id' = $SessionId
-    body $Body
+    body '{1}' with ({1} = $Body)
     timeout 60
     returns string;
 

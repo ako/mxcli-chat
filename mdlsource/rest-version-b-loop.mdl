@@ -229,16 +229,19 @@ end;
 /
 
 /**
- * The loop itself: ask, execute whatever tools come back, ask again.
+ * The loop itself: ask, execute the tool that comes back, ask again.
  *
  * Bounded at four rounds. An unbounded loop is a liveness bug waiting for a
  * model that keeps asking for the same tool, and the bound is the cheapest
  * possible answer to it.
  *
+ * One tool call per round, because the response is imported flat (see the domain
+ * script). Sequential tool use still works; two calls in a single turn do not.
+ *
  * @param $Chat the conversation, with the user's turn already appended
  * @returns the assistant's final answer
  */
-create or modify microflow MxcliChatRest.ACT_Chat_Respond (
+create microflow MxcliChatRest.ACT_Chat_Respond (
   $Chat: MxcliChatRest.Chat
 )
 returns string as $Answer
@@ -272,72 +275,51 @@ begin
     $Response = call microflow MxcliChatRest.SUB_OpenRouter_Complete (RequestRoot = $Root);
 
     @position(1400, 200)
-    retrieve $Choices from $Response/MxcliChatRest.CompletionChoice_CompletionResponse;
-
-    @position(1600, 200)
-    loop $Choice in $Choices
-    begin
+    if $Response/ToolName = '' then
+      @position(1500, 300)
+      set $Answer = $Response/Content;
       @position(1700, 300)
-      retrieve $ToolCalls from $Choice/MxcliChatRest.CompletionToolCall_CompletionChoice;
-
-      -- count() is an aggregate activity, not an expression function: using it
-      -- inside the decision builds as CE0117 "Error(s) in expression".
-      @position(1800, 300)
-      $ToolCallCount = count($ToolCalls);
-
+      set $Done = true;
       @position(1900, 300)
-      if $ToolCallCount = 0 then
-        @position(2000, 400)
-        set $Answer = $Choice/Content;
-        @position(2200, 400)
-        set $Done = true;
-        @position(2400, 400)
-        $Stored = call microflow MxcliChatRest.SUB_Chat_AddMessage (
-          Chat = $Chat,
-          Role = MxcliChatRest.ENUM_MessageRole.Assistant,
-          Content = $Choice/Content,
-          ToolCallId = '',
-          ToolName = '',
-          ToolArguments = ''
-        );
-      end if;
+      $Stored = call microflow MxcliChatRest.SUB_Chat_AddMessage (
+        Chat = $Chat,
+        Role = MxcliChatRest.ENUM_MessageRole.Assistant,
+        Content = $Response/Content,
+        ToolCallId = '',
+        ToolName = '',
+        ToolArguments = ''
+      );
+    else
+      @position(1500, 500)
+      $AssistantTurn = call microflow MxcliChatRest.SUB_Chat_AddMessage (
+        Chat = $Chat,
+        Role = MxcliChatRest.ENUM_MessageRole.Assistant,
+        Content = $Response/Content,
+        ToolCallId = $Response/ToolCallId,
+        ToolName = $Response/ToolName,
+        ToolArguments = $Response/ToolArguments
+      );
 
-      @position(2000, 600)
-      loop $ToolCall in $ToolCalls
-      begin
-        -- The assistant's turn has to be echoed back before its results, or the
-        -- next request has tool messages answering a call the model never made.
-        @position(2300, 700)
-        $AssistantTurn = call microflow MxcliChatRest.SUB_Chat_AddMessage (
-          Chat = $Chat,
-          Role = MxcliChatRest.ENUM_MessageRole.Assistant,
-          Content = '',
-          ToolCallId = $ToolCall/CallId,
-          ToolName = $ToolCall/ToolName,
-          ToolArguments = $ToolCall/ArgumentsJson
-        );
+      @position(1700, 500)
+      $ToolResult = call microflow MxcliChatRest.SUB_Mcp_CallTool (
+        SessionId = $SessionId,
+        ToolName = $Response/ToolName,
+        ArgumentsJson = $Response/ToolArguments
+      );
 
-        @position(2500, 700)
-        $ToolResult = call microflow MxcliChatRest.SUB_Mcp_CallTool (
-          SessionId = $SessionId,
-          ToolName = $ToolCall/ToolName,
-          ArgumentsJson = $ToolCall/ArgumentsJson
-        );
-
-        @position(2700, 700)
-        $ToolTurn = call microflow MxcliChatRest.SUB_Chat_AddMessage (
-          Chat = $Chat,
-          Role = MxcliChatRest.ENUM_MessageRole.Tool,
-          Content = $ToolResult/Text,
-          ToolCallId = $ToolCall/CallId,
-          ToolName = '',
-          ToolArguments = ''
-        );
-      end loop;
-    end loop;
+      @position(1900, 500)
+      $ToolTurn = call microflow MxcliChatRest.SUB_Chat_AddMessage (
+        Chat = $Chat,
+        Role = MxcliChatRest.ENUM_MessageRole.Tool,
+        Content = $ToolResult/Text,
+        ToolCallId = $Response/ToolCallId,
+        ToolName = '',
+        ToolArguments = ''
+      );
+    end if;
   end while;
 
-  @position(2900, 100)
+  @position(2100, 100)
   return $Answer;
 end;
 /

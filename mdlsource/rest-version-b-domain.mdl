@@ -64,7 +64,7 @@ delete_behavior DELETE_AND_REFERENCES;
  * full surface.
  */
 create json structure MxcliChatRest.JSON_ChatCompletion
-  snippet '{"id":"chatcmpl-1","model":"openai/gpt-oss-20b:free","choices":[{"index":0,"finish_reason":"stop","role":"assistant","content":"Hello.","tool_calls":[{"id":"call_1","name":"memory_search","arguments":"{}"}]}]}';
+  snippet '{"completion_id":"chatcmpl-1","model":"openai/gpt-oss-20b:free","finish_reason":"stop","role":"assistant","content":"Hello.","tool_call_id":"call_1","tool_name":"memory_search","tool_arguments":"{}"}';
 /
 
 /** The request half. */
@@ -73,46 +73,30 @@ create json structure MxcliChatRest.JSON_ChatRequest
 /
 
 /**
- * The response entities are shaped like the *transformed* response, not the API's.
+ * The response is imported as ONE flat object, not a tree.
  *
- * TRF_ChatCompletion (see rest-version-b-call.mdl) lifts `choices[].message` up
- * into the choice and flattens `tool_calls[].function` into the tool call, so
- * two object levels never need an entity. `Id` is reserved, hence CompletionId.
+ * The natural shape — a response with choices, each with tool calls — could not
+ * be made to work. An import mapping whose root object carries value mappings is
+ * rejected at runtime with
+ *   java.util.NoSuchElementException: key not found: Path(QName(None,),None,)
+ * while a mapping whose root has only an object child imports fine, and both
+ * pass `mx check` (FINDINGS 54). Flattening in JSLT sidesteps it: the transformer
+ * lifts choices[0] and tool_calls[0] to the root, so there is one entity, no
+ * associations, and nothing to navigate.
+ *
+ * The cost is real and worth stating: only the first tool call of a turn is
+ * executed. The loop still handles tool calls in sequence over its four rounds.
  */
 create non-persistent entity MxcliChatRest."CompletionResponse" (
   "CompletionId": string,
-  "ModelId": string
-);
-/
-
-create non-persistent entity MxcliChatRest."CompletionChoice" (
-  "ChoiceIndex": integer,
+  "ModelId": string,
   "FinishReason": string,
   "Role": string,
-  "Content": string
-);
-/
-
-/**
- * One tool the model wants called. `ArgumentsJson` is a JSON *string* in the API
- * itself — the one piece of arbitrary JSON that needs no transformer, because
- * OpenAI already escaped it.
- */
-create non-persistent entity MxcliChatRest."CompletionToolCall" (
-  "CallId": string(200),
+  "Content": string,
+  "ToolCallId": string(200),
   "ToolName": string(200),
-  "ArgumentsJson": string
+  "ToolArguments": string
 );
-/
-
-create association MxcliChatRest.CompletionChoice_CompletionResponse
-from MxcliChatRest.CompletionChoice to MxcliChatRest.CompletionResponse
-type reference;
-/
-
-create association MxcliChatRest.CompletionToolCall_CompletionChoice
-from MxcliChatRest.CompletionToolCall to MxcliChatRest.CompletionChoice
-type reference;
 /
 
 create non-persistent entity MxcliChatRest."RequestRoot" (

@@ -1162,3 +1162,118 @@ JsonNode schemaNode = MAPPER.readTree(schema);
 
 That connector predates data transformers (Mendix 11.9+). Version B gets the
 same result declaratively, in four lines of JSLT, with no Java.
+
+## 2026-08-13 — the token arrives, and one mxcli defect stops the last hop
+
+### 53. A REST call's URL and body are *templates*; a bare expression is stored as literal text
+
+```mdl
+$Response = rest call post @MxcliChatRest.McpEndpointUrl   -- WRONG
+    body $InitBody                                          -- WRONG
+```
+builds cleanly, passes `mx check`, and then POSTs to the literal string
+`"@MxcliChatRest.McpEndpointUrl"`:
+
+```
+org.apache.http.ProtocolException: Target host is not specified
+```
+
+`describe microflow` shows what was actually written — `rest call post
+'@MxcliChatRest.McpEndpointUrl'`, quoted. Only the parameterised form evaluates:
+
+```mdl
+$Response = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
+    body '{1}' with ({1} = $InitBody)
+```
+
+This is the same mechanism behind CE0712 on a literal JSON body: `{` opens a
+placeholder in a template, so a JSON body can never be a literal either.
+
+### 54. An import mapping whose root object carries value mappings fails at runtime
+
+`mx check` reports 0 errors. At runtime:
+
+```
+java.util.NoSuchElementException: key not found: Path(QName(None,),None,)
+  at com.mendix.integration.importer.mapping.MappingCache.storeValueMappingElement
+  at MxcliChatRest.SUB_OpenRouter_Complete (Import with mapping : 'Import from JSON')
+```
+
+`Path(QName(...))` is the *XML* path type, and the QName is empty — the runtime
+is looking up a value element by a name the mapping never gave it.
+
+What was ruled out, each by a separate boot: the nested array inside an array
+item; a `null` array in the payload; an empty array; the field name `id` (Mendix
+renames it to `_id` through its custom name map); recreating the mapping;
+recreating the JSON structure; recreating both in separate invocations; and
+`create or modify` versus `drop` + `create`. None of it moved the error.
+
+What does work, verified in the same runtime and the same boot:
+`IMM_McpToolList`, whose root object has **no value mappings** — only an object
+child. That mapping imports; the completion mapping in every shape tried does
+not.
+
+Two methodology notes, both mistakes made here first:
+- a probe that imports `on error continue` and then logs "ok" proves nothing.
+  The four shape variants that "passed" had all failed silently. Probes must let
+  the error escape.
+- the after-startup microflow is a good harness for this: it runs on every boot,
+  needs no browser, and a failure is loud (the runtime refuses to start).
+
+Version B works around it by flattening the response to a single object in JSLT
+— `choices[0]` and `tool_calls[0]` lifted to the root — which costs the ability
+to execute more than one tool call per turn.
+
+### 55. `log … with ()` segfaults mxcli
+
+An empty template-parameter list panics the visitor:
+
+```
+panic: runtime error: invalid memory address or nil pointer dereference
+  mdl/visitor.buildTemplateParams(visitor_microflow_actions.go:86)
+```
+
+Give the message a parameter, or leave the `with` clause off entirely.
+
+### 56. The container's egress proxy port rotates; the runtime captures it at boot
+
+`JAVA_TOOL_OPTIONS` carries `-Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=…`,
+and that port changed three times in one session (45891 → 45371 → 43199). The
+Mendix runtime reads it once at startup, so a call that worked minutes earlier
+starts failing with a bare "Error calling REST service" and no cause attached.
+
+Direct egress works, so the fix is to boot without the proxy in the environment:
+
+```bash
+env -u JAVA_TOOL_OPTIONS -u HTTPS_PROXY -u HTTP_PROXY mxcli run --local -p MxcliChat.mpr
+```
+
+This supersedes FINDINGS 44: openrouter.ai resolves and answers from this
+container. That finding was a symptom of the proxy, not a network policy.
+
+### 57. Constants are settable over the admin port — but `update_configuration` replaces the whole map
+
+```bash
+curl -X POST http://127.0.0.1:8090/ \
+  -H "X-M2EE-Authentication: $(printf 'mxcli-local-dev' | base64)" \
+  -d '{"action":"update_configuration","params":{"MicroflowConstants":{ …all 22… }}}'
+```
+
+Sending only the one constant you want to change silently blanks every other
+one — including the MCP endpoint URL, which then produces exactly the
+"Target host is not specified" of finding 53 and sends you hunting in the wrong
+place. Read `deployment/model/config.json`, edit the one value, send it all back.
+No restart is needed; the runtime picks the new values up immediately.
+
+### 58. OpenRouter answers, and a free model has opinions about mxcli
+
+`openai/gpt-oss-20b:free` responded through version B's own plumbing — request
+built by the export mapping, tools attached from the memory MCP server, schemas
+inlined by `from-json`, POSTed, 200 back. The response arrives with roughly 1.3 kB
+of whitespace padding ahead of the JSON (OpenRouter's keep-alive for non-streaming
+requests); JSLT does not mind it.
+
+The model did not call the memory tools, and its description of mxcli was
+confidently wrong — `.mdl` folders, `mendix build`, a `mendix/mxcli` Docker
+image, none of which exist. Worth remembering when reading the comparison: both
+versions are being judged on plumbing, not on what a free model says.

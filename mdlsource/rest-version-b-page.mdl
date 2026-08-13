@@ -1,0 +1,118 @@
+/**
+ * Version B's chat page — and the clearest single line in the comparison.
+ *
+ * Version A's page is a data view and a snippet call: message list, composer,
+ * tool-call rendering, streaming and markdown all arrive from ConversationalUI.
+ * This one is a list view, a text area and a button, and that is all it will
+ * ever be without building a chat UI by hand. The plumbing underneath is now
+ * comparable between the versions; the interface is not, and that gap is the
+ * honest cost of leaving the modules out.
+ */
+
+-- The composer needs somewhere to put its text. ConversationalUI has a whole
+-- non-persistent model for this; here it is one attribute on the chat.
+alter entity MxcliChatRest."Chat" add attribute "Draft": string;
+
+/**
+ * Opens a new conversation.
+ *
+ * @returns nothing; shows the chat page
+ */
+create microflow MxcliChatRest.ACT_Chat_Open ()
+folder 'Pages'
+begin
+  @position(0, 100)
+  $Chat = create MxcliChatRest.Chat (
+    Title = 'New chat',
+    StartedAt = [%CurrentDateTime%],
+    LastMessageAt = [%CurrentDateTime%],
+    ModelName = @MxcliChatRest.OpenRouterModel,
+    Draft = ''
+  ) commit;
+
+  @position(200, 100)
+  show page MxcliChatRest.Chat_Rest ($Chat = $Chat);
+
+  @position(400, 100)
+  return;
+end;
+/
+
+/**
+ * Sends the composer's text and runs the loop until the model stops asking for
+ * tools.
+ *
+ * Synchronous on purpose. Version A streams, because ConversationalUI does the
+ * streaming; here the button simply blocks until the last round returns, which
+ * is what a hand-written loop gets you without more work.
+ *
+ * @param $Chat the conversation
+ */
+create microflow MxcliChatRest.ACT_Chat_Send (
+  $Chat: MxcliChatRest.Chat
+)
+folder 'Pages'
+begin
+  @position(0, 100)
+  declare $Text string = trim($Chat/Draft);
+
+  @position(200, 100)
+  if $Text != '' then
+    @position(300, 200)
+    $UserTurn = call microflow MxcliChatRest.SUB_Chat_AddMessage (
+      Chat = $Chat,
+      Role = MxcliChatRest.ENUM_MessageRole.User,
+      Content = $Text,
+      ToolCallId = '',
+      ToolName = '',
+      ToolArguments = ''
+    );
+
+    @position(500, 200)
+    change $Chat (Draft = '') commit refresh;
+
+    @position(700, 200)
+    $Answer = call microflow MxcliChatRest.ACT_Chat_Respond (Chat = $Chat);
+  end if;
+
+  @position(900, 100)
+  return;
+end;
+/
+
+create page MxcliChatRest.Chat_Rest (
+  Title: 'Chat (plain REST)',
+  Layout: Atlas_Core.Atlas_Default,
+  Folder: 'Pages',
+  Params: { $Chat: MxcliChatRest.Chat }
+) {
+  container containerChatPage (Class: 'chat-page--fullheight-centered') {
+    dataview dataViewChat (
+      DataSource: $Chat,
+      FormOrientation: Vertical
+    ) {
+      container containerTranscript (Class: 'card chat-container') {
+        listview listMessages (
+          DataSource: database from MxcliChatRest.Message
+            where [MxcliChatRest.Message_Chat = $Chat]
+            sort by SequenceNumber asc
+        ) {
+          container containerTurn (Class: 'chat-turn') {
+            dynamictext textRole (Attribute: Role, Class: 'chat-turn__role')
+            dynamictext textContent (Attribute: Content)
+          }
+        }
+      }
+      container containerComposer (Class: 'card') {
+        textarea textDraft (Label: 'Message', Attribute: Draft)
+        actionbutton buttonSend (
+          Caption: 'Send',
+          Action: MICROFLOW MxcliChatRest.ACT_Chat_Send(Chat: $Chat),
+          ButtonStyle: primary
+        )
+      }
+    }
+  }
+}
+/
+
