@@ -1402,3 +1402,53 @@ NanoflowCommons was the last stale module (finding 15). After
 `marketplace update 109515 --module NanoflowCommons --to 7.2.1 --no-baseline`
 and `mxcli fix widgets`: **7.2.1**, `mx check` 0 errors, 2227 `.mxunit` files
 unchanged — MPR v2 preserved, exactly as finding 13 requires.
+
+### 63. A microflow-typed argument that is last in the list swallows the newline
+
+Found while removing the bridges finding 60 made unnecessary. This builds:
+
+```mdl
+ExecutingMicroflow = MxcliChatCore.MCP_Memory_Search,
+Schema = empty
+);
+```
+
+and this does not:
+
+```mdl
+AuthenticationMicroflow = MxcliChatCore.SUB_Mcp_Authorize
+);
+```
+
+```
+[CE1613] "The selected microflow 'MxcliChatCore.SUB_Mcp_Authorize
+  ' no longer exists." at Call Java action activity 'Create MCP Server'
+```
+
+The reference is stored with the trailing newline and indentation included, so
+it resolves to nothing. Only the **last** argument is affected — anything
+followed by a comma is fine. `mxcli check --references` passes either way; the
+build catches it, and the error text gives it away by wrapping mid-quote.
+
+Workaround: close the paren on the same line as the last argument, or put a
+comma-terminated argument after it.
+
+### 64. Both bridges removed, verified at runtime
+
+`SUB_McpServer_Register` now calls `MCPServer.CreateMCPServer` and
+`MCPServer.AddTool` directly, and `ACT_Chat_Open` calls
+`AgentCommons.ChatContext_Create_ForAgent` directly. Three Java actions and
+~40 lines of Java are gone from the app.
+
+Verified on a running app, not just at build time:
+
+- `tools/list` over the memory endpoint returns all four tools —
+  `memory_search`, `memory_list`, `memory_add`, `memory_forget` — so both the
+  server creation and every tool registration work through direct calls;
+- version A's chat page opens and renders ConversationalUI's composer, so
+  `ChatContext_Create_ForAgent` works with a real microflow reference.
+
+The gain is not only line count. A microflow passed as a string was not a
+reference: renaming `MCP_Memory_Search` would have left registration compiling
+and failing at runtime. Now it is a model reference, and the rename would be
+caught — or carried — by the tooling.

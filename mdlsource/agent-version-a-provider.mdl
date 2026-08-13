@@ -68,9 +68,11 @@ begin
     where Title = 'MxcliChat Assistant'
     limit 1;
 
-  $ChatContext = call java action MxcliChatAgent.JA_ChatContext_CreateForAgent (
+  $ChatContext = call java action AgentCommons.ChatContext_Create_ForAgent (
     Agent = $Agent,
-    ActionMicroflow = 'ConversationalUI.ChatContext_ChatWithHistory_ActionMicroflow_Agent'
+    ActionMicroflow = ConversationalUI.ChatContext_ChatWithHistory_ActionMicroflow_Agent,
+    ContextObject = empty,
+    OverwritingDeployedModel = empty
   );
 
   show page MxcliChatAgent.Chat_Agent ($ChatContext = $ChatContext);

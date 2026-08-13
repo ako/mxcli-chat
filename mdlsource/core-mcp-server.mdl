@@ -249,35 +249,38 @@ begin
     Name = 'mxclichat-memory',
     Version = '1.0.0',
     ProtocolVersion = MCPServer.ENUM_ProtocolVersion.v2025_03_26,
-    AuthenticationMicroflow = 'MxcliChatCore.SUB_Mcp_Authorize'
-  );
+    AuthenticationMicroflow = MxcliChatCore.SUB_Mcp_Authorize);
 
   $ToolSearch = call java action MCPServer.AddTool (
     McpServer = $Server,
     Name = 'memory_search',
     Description = 'Search remembered facts, preferences and instructions by phrase. Returns matching memories with their numbers.',
-    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Search'
+    ExecutingMicroflow = MxcliChatCore.MCP_Memory_Search,
+    Schema = empty
   );
 
   $ToolList = call java action MCPServer.AddTool (
     McpServer = $Server,
     Name = 'memory_list',
     Description = 'List everything currently remembered, newest first.',
-    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_List'
+    ExecutingMicroflow = MxcliChatCore.MCP_Memory_List,
+    Schema = empty
   );
 
   $ToolAdd = call java action MCPServer.AddTool (
     McpServer = $Server,
     Name = 'memory_add',
     Description = 'Remember one thing. Kind is fact, preference or instruction.',
-    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Add'
+    ExecutingMicroflow = MxcliChatCore.MCP_Memory_Add,
+    Schema = empty
   );
 
   $ToolForget = call java action MCPServer.AddTool (
     McpServer = $Server,
     Name = 'memory_forget',
     Description = 'Forget one memory, by the number that memory_search and memory_list report.',
-    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Forget'
+    ExecutingMicroflow = MxcliChatCore.MCP_Memory_Forget,
+    Schema = empty
   );
 
   return true;
