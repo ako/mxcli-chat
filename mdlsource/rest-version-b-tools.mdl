@@ -1,0 +1,222 @@
+/**
+ * The tool half of version B's wire format — and the answer to "can a
+ * transformation carry arbitrary JSON?".
+ *
+ * The problem: `tools[].function.parameters` is a JSON Schema chosen by whoever
+ * wrote the tool. Every MCP server publishes a different one, and it can change
+ * without the app being rebuilt. A Mendix export mapping cannot emit that: a
+ * mapping walks a JSON structure whose element tree is fixed at design time.
+ *
+ * The answer: a data transformer (Mendix 11.9+, JSLT for JSON). The export
+ * mapping treats the schema as an opaque *string* attribute — a shape it is
+ * perfectly happy with — and a JSLT step splices it in as real JSON on the way
+ * out, with from-json(). The same trick runs the other way on the way in:
+ * to-json() collapses an arbitrary object into a string an import mapping can
+ * store.
+ *
+ * So the arbitrary content never passes through a mapping at all. It passes
+ * *beside* it, as a string, and the transformer is what makes it JSON again.
+ */
+
+/**
+ * One tool offered to the model.
+ *
+ * SchemaJson is unbounded on purpose: it holds a whole JSON Schema, and the
+ * app has no say in how big or how nested that is.
+ */
+create non-persistent entity MxcliChatRest."ToolDefinition" (
+  "ToolName": string(200),
+  "Description": string(1000),
+  /** A complete JSON Schema, verbatim, as the tool's owner wrote it. */
+  "SchemaJson": string
+);
+/
+
+/** The array container for tools, same pattern as RequestMessages. */
+create non-persistent entity MxcliChatRest."RequestTools" (
+  "Unused": string(1)
+);
+/
+
+/** `owner both` for the same reason as the message associations: the export
+ * mapping walks RequestRoot -> its tools, and CE0295 rejects anything less. */
+create association MxcliChatRest."RequestTools_RequestRoot"
+from MxcliChatRest."RequestTools" to MxcliChatRest."RequestRoot"
+type reference
+owner both;
+/
+
+create association MxcliChatRest."ToolDefinition_RequestTools"
+from MxcliChatRest."ToolDefinition" to MxcliChatRest."RequestTools"
+type reference
+owner both;
+/
+
+/**
+ * The request structure the *mapping* produces — deliberately not the request
+ * OpenAI receives.
+ *
+ * Two differences, both absorbed by the transformer below:
+ *   - `parameters` is a string here, an object on the wire;
+ *   - tools are flat here, nested under type/function on the wire.
+ * The second one is free once the first one forces a transformer, and it saves
+ * two entities and an association that would otherwise exist only to model
+ * {"type": "function", "function": {...}}.
+ */
+create or modify json structure MxcliChatRest.JSON_ChatRequest
+  snippet $${"model":"openai/gpt-oss-20b:free","messages":[{"role":"user","content":"Hello."}],"tools":[{"name":"memory_search","description":"Search stored memories.","parameters":"{}"}]}$$;
+/
+
+/**
+ * Writes the flat request. The transformer turns it into the real one.
+ *
+ * Two levels per array: the container element (`messages`, `tools`) and the item
+ * element, which Mendix names after the array — `MessagesItem`, `ToolsItem`.
+ */
+create or modify export mapping MxcliChatRest.EMM_ChatRequest
+  with json structure MxcliChatRest.JSON_ChatRequest
+{
+  MxcliChatRest.RequestRoot {
+    model = ModelId,
+    MxcliChatRest.RequestMessages_RequestRoot/MxcliChatRest.RequestMessages as messages {
+      MxcliChatRest.RequestMessage_RequestMessages/MxcliChatRest.RequestMessage as MessagesItem {
+        role = Role,
+        content = Content
+      }
+    },
+    MxcliChatRest.RequestTools_RequestRoot/MxcliChatRest.RequestTools as tools {
+      MxcliChatRest.ToolDefinition_RequestTools/MxcliChatRest.ToolDefinition as ToolsItem {
+        name = ToolName,
+        description = Description,
+        parameters = SchemaJson
+      }
+    }
+  }
+};
+/
+
+/**
+ * Flat mapping output -> the request OpenRouter expects.
+ *
+ * from-json(.parameters) is the whole point: the schema arrives as a string and
+ * leaves as a JSON object, with no design-time knowledge of what is inside it.
+ *
+ * `tools` is emitted unconditionally. Upstream JSLT drops object keys whose
+ * value is null, so the usual `if (.tools) ... else null` idiom would omit the
+ * key; Mendix's JSLT keeps nulls, and `"tools": null` is not the same request as
+ * no tools at all (FINDINGS 48). Version B always offers the memory tools, so
+ * the branch is not needed — but a template copied from the JSLT docs would be
+ * wrong here.
+ */
+create data transformer MxcliChatRest.TRF_ChatRequest
+  source json '{"model":"openai/gpt-oss-20b:free","messages":[{"role":"user","content":"Hello."}],"tools":[{"name":"memory_search","description":"Search stored memories.","parameters":"{}"}]}'
+{
+  JSLT $$
+{
+  "model": .model,
+  "messages": [for (.messages) {"role": .role, "content": .content}],
+  "tools": [for (.tools)
+    {
+      "type": "function",
+      "function": {
+        "name": .name,
+        "description": .description,
+        "parameters": from-json(.parameters)
+      }
+    }
+  ]
+}
+  $$;
+};
+/
+
+-- ---------------------------------------------------------------------------
+-- The same trick, inbound: MCP tools/list
+-- ---------------------------------------------------------------------------
+
+/**
+ * An MCP server answers tools/list with an inputSchema per tool, and that is
+ * arbitrary JSON for exactly the same reason. to-json() collapses it into a
+ * string so an ordinary import mapping can store it — and the string is then
+ * ready to hand straight back to TRF_ChatRequest, which will inline it again.
+ *
+ * The JSON-RPC envelope is unwrapped in the same step, so the import mapping
+ * never sees jsonrpc/id/result either.
+ */
+create data transformer MxcliChatRest.TRF_McpToolList
+  source json '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"memory_add","description":"Store a memory.","inputSchema":{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}}]}}'
+{
+  JSLT $$
+{
+  "tools": [for (.result.tools)
+    {
+      "name": .name,
+      "description": .description,
+      "schemaJson": to-json(.inputSchema)
+    }
+  ]
+}
+  $$;
+};
+/
+
+/** The flattened tool list — what the transformer hands the import mapping. */
+create json structure MxcliChatRest.JSON_McpToolList
+  snippet $${"tools":[{"name":"memory_add","description":"Store a memory.","schemaJson":"{}"}]}$$;
+/
+
+create non-persistent entity MxcliChatRest."McpToolList" (
+  "ServerLabel": string(200)
+);
+/
+
+create non-persistent entity MxcliChatRest."McpTool" (
+  "ToolName": string(200),
+  "Description": string(1000),
+  /** The server's inputSchema, verbatim, as a string. */
+  "SchemaJson": string
+);
+/
+
+create association MxcliChatRest."McpTool_McpToolList"
+from MxcliChatRest."McpTool" to MxcliChatRest."McpToolList"
+type reference;
+/
+
+create import mapping MxcliChatRest.IMM_McpToolList
+  with json structure MxcliChatRest.JSON_McpToolList
+{
+  create MxcliChatRest.McpToolList {
+    create MxcliChatRest.McpTool_McpToolList/MxcliChatRest.McpTool = tools {
+      ToolName = name,
+      Description = description,
+      SchemaJson = schemaJson
+    }
+  }
+};
+/
+
+/**
+ * Builds the request body: mapping first, transformer second.
+ *
+ * Version A has no equivalent. There, GenAICommons owns the request object and
+ * the OpenAI Connector serialises it, so the arbitrary-schema problem is solved
+ * inside the module and never reaches the app.
+ *
+ * @param $RequestRoot the request, with its messages and tools attached
+ * @returns the JSON body to POST
+ */
+create microflow MxcliChatRest.SUB_ChatRequest_Build (
+  $RequestRoot: MxcliChatRest.RequestRoot
+)
+returns string as $Body
+folder 'Wire'
+begin
+  @position(0, 100)
+  $FlatJson = export to mapping MxcliChatRest.EMM_ChatRequest($RequestRoot);
+  @position(200, 100)
+  $Body = transform $FlatJson with MxcliChatRest.TRF_ChatRequest;
+  @position(400, 100)
+  return $Body;
+end;
+/

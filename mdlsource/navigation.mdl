@@ -1,0 +1,20 @@
+/**
+ * App navigation.
+ *
+ * The chat page takes a ChatContext parameter, so it cannot be a home page or a
+ * plain menu target — both entries go through microflows that create the context
+ * first. Version B will add its own entry beside version A's, which is the point:
+ * one app, two chats, same memory behind them.
+ *
+ * Both chats open through a microflow: version A's page needs a ChatContext,
+ * version B's needs a Chat, and neither can be created by a menu item.
+ */
+create or replace navigation Responsive
+  home page MyFirstModule.Home_Web
+  menu (
+    menu item 'Home' page MyFirstModule.Home_Web;
+    menu item 'Chat (agent modules)' microflow MxcliChatAgent.ACT_Chat_Open;
+    menu item 'Chat (plain REST)' microflow MxcliChatRest.ACT_Chat_Open;
+    menu item 'Model configuration' page OpenAIConnector.Configuration_Overview;
+  )
+;

@@ -1,0 +1,151 @@
+/**
+ * MxcliChatRest — version B of the comparison, on plain REST and microflows.
+ *
+ * Same app as version A, none of the GenAI modules. Everything version A got
+ * from AgentCommons, ConversationalUI and GenAICommons is modelled here: the
+ * conversation, the messages, the wire format of the OpenAI-compatible API, and
+ * later the tool loop and the MCP client.
+ *
+ * Memory is NOT modelled here — both versions call the same MCP tools published
+ * by MxcliChatCore, so the tool surface is a constant and the chat plumbing is
+ * the variable.
+ *
+ * This file is the domain model and the wire format. The call, the tool loop and
+ * the page follow in their own scripts.
+ */
+
+create module "MxcliChatRest";
+
+/** Who produced a message. Mirrors the OpenAI role vocabulary. */
+create enumeration "MxcliChatRest"."ENUM_MessageRole" (
+  System 'System',
+  User 'User',
+  Assistant 'Assistant',
+  Tool 'Tool'
+);
+/
+
+/** One conversation. Version A got this from ConversationalUI.ChatContext. */
+create persistent entity "MxcliChatRest"."Chat" (
+  "Title": string(200),
+  "StartedAt": datetime,
+  "LastMessageAt": datetime,
+  "ModelName": string(200)
+);
+/
+
+/** One turn. Version A got this from ConversationalUI.Message. */
+create persistent entity "MxcliChatRest"."Message" (
+  "Role": MxcliChatRest.ENUM_MessageRole default User,
+  "Content": string,
+  "SequenceNumber": integer,
+  "CreatedAt": datetime,
+  /** Set on assistant turns that asked for tools, for the trace. */
+  "ToolCallSummary": string(1000)
+)
+index idx_message_sequence ("SequenceNumber");
+/
+
+create association "MxcliChatRest"."Message_Chat"
+from "MxcliChatRest"."Message" to "MxcliChatRest"."Chat"
+type reference
+delete_behavior DELETE_AND_REFERENCES;
+/
+
+-- ---------------------------------------------------------------------------
+-- The wire format. Version A never saw this: GenAI Commons owns it there.
+-- ---------------------------------------------------------------------------
+
+/**
+ * The response half of POST /chat/completions, trimmed to what this app reads.
+ *
+ * Deliberately minimal — usage, logprobs and the streaming variants are all
+ * omitted. A JSON structure has to match the payload's shape, not the API's
+ * full surface.
+ */
+create json structure MxcliChatRest.JSON_ChatCompletion
+  snippet '{"completion_id":"chatcmpl-1","model":"openai/gpt-oss-20b:free","finish_reason":"stop","role":"assistant","content":"Hello.","tool_call_id":"call_1","tool_name":"memory_search","tool_arguments":"{}"}';
+/
+
+/** The request half. */
+create json structure MxcliChatRest.JSON_ChatRequest
+  snippet '{"model":"openai/gpt-oss-20b:free","messages":[{"role":"user","content":"Hello."}]}';
+/
+
+/**
+ * The response is imported as ONE flat object, not a tree.
+ *
+ * The natural shape — a response with choices, each with tool calls — could not
+ * be made to work. An import mapping whose root object carries value mappings is
+ * rejected at runtime with
+ *   java.util.NoSuchElementException: key not found: Path(QName(None,),None,)
+ * while a mapping whose root has only an object child imports fine, and both
+ * pass `mx check` (FINDINGS 54). Flattening in JSLT sidesteps it: the transformer
+ * lifts choices[0] and tool_calls[0] to the root, so there is one entity, no
+ * associations, and nothing to navigate.
+ *
+ * The cost is real and worth stating: only the first tool call of a turn is
+ * executed. The loop still handles tool calls in sequence over its four rounds.
+ */
+create non-persistent entity MxcliChatRest."CompletionResponse" (
+  "CompletionId": string,
+  "ModelId": string,
+  "FinishReason": string,
+  "Role": string,
+  "Content": string,
+  "ToolCallId": string(200),
+  "ToolName": string(200),
+  "ToolArguments": string
+);
+/
+
+create non-persistent entity MxcliChatRest."RequestRoot" (
+  "ModelId": string
+);
+/
+
+create non-persistent entity MxcliChatRest."RequestMessage" (
+  "Role": string,
+  "Content": string,
+  "Ordinal": integer
+);
+/
+
+/**
+ * A JSON array needs a container entity between the root and the items, holding
+ * nothing itself. `messages` is the container, each RequestMessage is an item.
+ *
+ * This is not decoration. Mapping RequestRoot straight to the array builds and
+ * passes `mx check`, then fails at runtime the moment a second object exists:
+ *   com.fasterxml.jackson.core.JsonGenerationException:
+ *   Can not write a field name, expecting a value
+ *     at MxcliChatRest.SUB_ChatRequest_Build (Export with mapping : 'Export to JSON')
+ * The exporter opens the array element and then has nowhere to put the item
+ * object, so it writes the item's first field name into the array. An empty root
+ * exports fine, which is what makes this one so easy to ship broken (FINDINGS 49).
+ */
+create non-persistent entity MxcliChatRest."RequestMessages" (
+  "Unused": string(1)
+);
+/
+
+/**
+ * `owner both` is load-bearing on both levels. An export mapping that walks
+ * parent -> children needs the association navigable in both directions; a plain
+ * `type reference` is rejected by MxBuild with
+ *   CE0295 "Association 'MxcliChatRest.RequestMessage_RequestRoot' is not allowed."
+ * at the array's object mapping element. Reversing the association into a
+ * RequestRoot -> RequestMessage reference_set does NOT help — only `owner both`
+ * does.
+ */
+create association MxcliChatRest."RequestMessages_RequestRoot"
+from MxcliChatRest."RequestMessages" to MxcliChatRest."RequestRoot"
+type reference
+owner both;
+/
+
+create association MxcliChatRest."RequestMessage_RequestMessages"
+from MxcliChatRest."RequestMessage" to MxcliChatRest."RequestMessages"
+type reference
+owner both;
+/

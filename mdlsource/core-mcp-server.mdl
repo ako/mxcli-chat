@@ -1,0 +1,311 @@
+/**
+ * MxcliChatCore — memory tools, and the MCP server that publishes them.
+ *
+ * The MCP Server module's whole API is three Java actions called from a startup
+ * microflow: CreateMCPServer, AddTool, AddPrompt. AddTool derives each tool's
+ * JSON schema from the executing microflow's signature when Schema is left
+ * empty, so the microflow parameters below ARE the tool contract — renaming a
+ * parameter renames what the model sees.
+ *
+ * Every tool returns a String rather than an object, because that is what an MCP
+ * tool result is: text handed back to the model.
+ */
+
+/**
+ * MCP tool `memory_add` — remember one thing.
+ *
+ * @param $Content the statement to remember
+ * @param $Kind fact | preference | instruction (anything else is treated as fact)
+ * @returns confirmation naming the new memory's number
+ */
+create microflow MxcliChatCore.MCP_Memory_Add (
+  $Content: string,
+  $Kind: string
+)
+returns string as $Result
+folder 'MCP Tools'
+begin
+  declare $Result string = '';
+
+  if trim($Content) = '' then
+    set $Result = 'Nothing stored: content was empty.';
+  else
+    $Memory = create MxcliChatCore.Memory (
+      Content = trim($Content),
+      Kind = MxcliChatCore.ENUM_MemoryKind.Fact,
+      SourceLabel = 'mcp',
+      CapturedAt = [%CurrentDateTime%],
+      IsActive = true
+    );
+
+    if toLowerCase(trim($Kind)) = 'preference' then
+      change $Memory (Kind = MxcliChatCore.ENUM_MemoryKind.Preference);
+    else
+      if toLowerCase(trim($Kind)) = 'instruction' then
+        change $Memory (Kind = MxcliChatCore.ENUM_MemoryKind.Instruction);
+      end if;
+    end if;
+
+    commit $Memory;
+    set $Result = 'Stored memory #' + toString($Memory/MemoryNumber) + '.';
+  end if;
+
+  return $Result;
+end;
+/
+
+/**
+ * MCP tool `memory_search` — find remembered things matching a phrase.
+ *
+ * Matching is a case-insensitive substring test done in the loop rather than in
+ * the retrieve, so the tool behaves the same whatever the database does with
+ * XPath string functions. A memory store this size does not need an index scan.
+ *
+ * @param $Query phrase to look for
+ * @param $MaxResults how many to return; 0 or less means 10
+ * @returns matching memories, one per ' | ' separated entry
+ */
+create microflow MxcliChatCore.MCP_Memory_Search (
+  $Query: string,
+  $MaxResults: integer
+)
+returns string as $Result
+folder 'MCP Tools'
+begin
+  declare $Result string = '';
+  declare $Count integer = 0;
+  declare $Limit integer = 10;
+
+  if $MaxResults > 0 then
+    set $Limit = $MaxResults;
+  end if;
+
+  retrieve $Memories from MxcliChatCore.Memory
+    where IsActive = true
+    sort by MxcliChatCore.Memory.CapturedAt desc;
+
+  loop $Memory in $Memories
+  begin
+    if $Count < $Limit and contains(toLowerCase($Memory/Content), toLowerCase(trim($Query))) then
+      set $Result = $Result + '#' + toString($Memory/MemoryNumber) + ' ' + $Memory/Content + ' | ';
+      set $Count = $Count + 1;
+      change $Memory (LastUsedAt = [%CurrentDateTime%]);
+      commit $Memory;
+    end if;
+  end loop;
+
+  if $Count = 0 then
+    set $Result = 'No memories matched.';
+  end if;
+
+  return $Result;
+end;
+/
+
+/**
+ * MCP tool `memory_list` — everything currently remembered, newest first.
+ *
+ * @param $MaxResults how many to return; 0 or less means 25
+ * @returns memories, one per ' | ' separated entry
+ */
+create microflow MxcliChatCore.MCP_Memory_List (
+  $MaxResults: integer
+)
+returns string as $Result
+folder 'MCP Tools'
+begin
+  declare $Result string = '';
+  declare $Count integer = 0;
+  declare $Limit integer = 25;
+
+  if $MaxResults > 0 then
+    set $Limit = $MaxResults;
+  end if;
+
+  retrieve $Memories from MxcliChatCore.Memory
+    where IsActive = true
+    sort by MxcliChatCore.Memory.CapturedAt desc;
+
+  loop $Memory in $Memories
+  begin
+    if $Count < $Limit then
+      set $Result = $Result + '#' + toString($Memory/MemoryNumber) + ' ' + $Memory/Content + ' | ';
+      set $Count = $Count + 1;
+    end if;
+  end loop;
+
+  if $Count = 0 then
+    set $Result = 'Nothing remembered yet.';
+  end if;
+
+  return $Result;
+end;
+/
+
+/**
+ * MCP tool `memory_forget` — deactivate one memory by its number.
+ *
+ * Soft delete: the row stays, so a forgotten memory can still be audited.
+ *
+ * @param $MemoryId the number shown by memory_search / memory_list
+ * @returns confirmation, or a note that nothing matched
+ */
+create microflow MxcliChatCore.MCP_Memory_Forget (
+  $MemoryId: string
+)
+returns string as $Result
+folder 'MCP Tools'
+begin
+  declare $Result string = '';
+  declare $Number integer = 0;
+
+  set $Number = parseInteger(trim($MemoryId));
+
+  retrieve $Memory from MxcliChatCore.Memory
+    where MemoryNumber = $Number
+    limit 1;
+
+  if $Memory = empty then
+    set $Result = 'No memory #' + trim($MemoryId) + ' found.';
+  else
+    change $Memory (IsActive = false);
+    commit $Memory;
+    set $Result = 'Forgot memory #' + trim($MemoryId) + '.';
+  end if;
+
+  return $Result;
+end;
+/
+
+/**
+ * Returns the single local account the MCP server runs as, creating it once.
+ *
+ * This app has no authentication, but the MCP Server module still requires an
+ * authentication microflow returning a System.User — an empty return means "not
+ * authorized". A blank Mendix app has no users at all (the runtime logs
+ * "MxAdmin user with username 'MxAdmin' does not exist!"), so one is made here.
+ *
+ * @returns the mcp-local account
+ */
+create microflow MxcliChatCore.SUB_Mcp_EnsureUser ()
+returns Administration.Account as $Account
+folder 'MCP Server'
+begin
+  retrieve $Existing from Administration.Account
+    where Name = 'mcp-local'
+    limit 1;
+
+  if $Existing = empty then
+    $Created = create Administration.Account (
+      Name = 'mcp-local',
+      FullName = 'MCP local user',
+      Active = true
+    );
+    commit $Created;
+    return $Created;
+  else
+    return $Existing;
+  end if;
+end;
+/
+
+/**
+ * Authentication microflow for the MCP server.
+ *
+ * Single user, no auth: every request is authorized as the local account. The
+ * two parameters are the signature the MCP Server module calls with — the
+ * HttpRequest is where a real implementation would read an Authorization header.
+ *
+ * @param $HttpRequest the incoming MCP request
+ * @param $McpServer the server being called
+ * @returns the user the request runs as; never empty
+ */
+create microflow MxcliChatCore.SUB_Mcp_Authorize (
+  $HttpRequest: System.HttpRequest,
+  $McpServer: MCPServer.McpServer
+)
+returns System.User as $User
+folder 'MCP Server'
+begin
+  $Account = call microflow MxcliChatCore.SUB_Mcp_EnsureUser();
+  return $Account;
+end;
+/
+
+/**
+ * Registers the memory MCP server and its four tools.
+ *
+ * Called at startup. The server is reachable at <app url>/memory; the tool
+ * schemas are derived from each executing microflow's parameters.
+ *
+ * @returns true once the server is registered
+ */
+create microflow MxcliChatCore.SUB_McpServer_Register ()
+returns boolean as $Registered
+folder 'MCP Server'
+begin
+  $Server = call java action MCPServer.CreateMCPServer (
+    Path = 'memory',
+    Name = 'mxclichat-memory',
+    Version = '1.0.0',
+    ProtocolVersion = MCPServer.ENUM_ProtocolVersion.v2025_03_26,
+    AuthenticationMicroflow = 'MxcliChatCore.SUB_Mcp_Authorize'
+  );
+
+  $ToolSearch = call java action MCPServer.AddTool (
+    McpServer = $Server,
+    Name = 'memory_search',
+    Description = 'Search remembered facts, preferences and instructions by phrase. Returns matching memories with their numbers.',
+    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Search'
+  );
+
+  $ToolList = call java action MCPServer.AddTool (
+    McpServer = $Server,
+    Name = 'memory_list',
+    Description = 'List everything currently remembered, newest first.',
+    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_List'
+  );
+
+  $ToolAdd = call java action MCPServer.AddTool (
+    McpServer = $Server,
+    Name = 'memory_add',
+    Description = 'Remember one thing. Kind is fact, preference or instruction.',
+    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Add'
+  );
+
+  $ToolForget = call java action MCPServer.AddTool (
+    McpServer = $Server,
+    Name = 'memory_forget',
+    Description = 'Forget one memory, by the number that memory_search and memory_list report.',
+    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Forget'
+  );
+
+  return true;
+end;
+/
+
+/**
+ * The app's after-startup microflow.
+ *
+ * Mendix allows exactly one, and two installed modules want one, so the chaining
+ * lives here. AgentEditorCommons.ASU_AgentEditor must keep running: it is what
+ * materialises agent-editor documents into AgentCommons rows.
+ *
+ * Note it is fatal by design — if it throws, the runtime refuses to start (see
+ * FINDINGS 30). That is why it is called first: a failure here should be obvious,
+ * not masked by later steps.
+ *
+ * @returns true once startup is complete
+ */
+create microflow MxcliChatCore.ASU_MxcliChat ()
+returns boolean as $Started
+folder 'Startup'
+begin
+  $AgentEditorReady = call microflow AgentEditorCommons.ASU_AgentEditor ();
+  $LocalUser = call microflow MxcliChatCore.SUB_Mcp_EnsureUser ();
+  $McpReady = call microflow MxcliChatCore.SUB_McpServer_Register ();
+  return true;
+end;
+/
+
+alter settings model AfterStartupMicroflow = 'MxcliChatCore.ASU_MxcliChat';

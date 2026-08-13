@@ -1,0 +1,34 @@
+/**
+ * Runtime configuration required by the Mendix agent-editor stack.
+ *
+ * 1. ASU_AgentEditor materialises the agent-editor documents (Agent, Model,
+ *    Knowledge Base, Consumed MCP Service) into AgentCommons entities at boot.
+ *    Without it, 'create agent' documents exist in the model but no
+ *    AgentCommons.Agent rows exist to retrieve at runtime.
+ * 2. The Encryption module needs a 32-character key; models and knowledge bases
+ *    reference it to store provider credentials.
+ *
+ * The key is set as the constant's model-level DEFAULT, not as a
+ * per-configuration override. An override does not reach a `mxcli run --local`
+ * runtime: mxbuild writes deployment/model/config.json with each constant's
+ * *default*, and that map is what mxcli hands the runtime as MicroflowConstants.
+ * An earlier version of this script used
+ *   alter settings constant '…' value '…' in configuration 'Default';
+ * and left Encryption.EncryptionKey empty in the running app. Verified by
+ * reading deployment/model/config.json after a build.
+ *
+ * NOTE: the key below is a development value committed for local convenience.
+ * A default is not the deployment mechanism — the runtime takes its constant
+ * values over the M2EE admin port (update_configuration's MicroflowConstants),
+ * which is how Mendix Cloud injects per-environment values and how mxcli itself
+ * passes them at boot. So the real key is supplied there, and this default only
+ * ever serves a local dev run.
+ */
+alter settings model AfterStartupMicroflow = 'AgentEditorCommons.ASU_AgentEditor';
+
+create or modify constant Encryption.EncryptionKey
+  TYPE String
+  DEFAULT '95d69f1a0e91b95776477d61b5333bb0'
+  COMMENT 'Development key. Override per environment before deploying.';
+
+alter settings drop constant 'Encryption.EncryptionKey' in configuration 'Default';

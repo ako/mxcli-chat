@@ -1,0 +1,141 @@
+/**
+ * A two-action bridge so the MCP server can be registered from MDL.
+ *
+ * WHY THIS EXISTS. MCPServer.CreateMCPServer and MCPServer.AddTool each take a
+ * *microflow-typed* parameter (AuthenticationMicroflow, ExecutingMicroflow).
+ * In the model those are `Microflows$MicroflowParameterValue` arguments, and
+ * mxcli's MDL writer only emits `Microflows$BasicCodeActionParameterValue` — a
+ * plain expression. Calling them directly from MDL therefore produces
+ *
+ *   CE0115 "The arguments that are passed to Java action
+ *   'MCPServer.CreateMCPServer' do not match the expected parameters and need
+ *   to be refreshed."
+ *
+ * and the project will not build. Verified by dumping the BSON of MCPServer's
+ * own example microflow, which uses MicroflowParameterValue where mxcli writes
+ * BasicCodeActionParameterValue.
+ *
+ * On the JAVA side those parameters are plain `java.lang.String` — the
+ * microflow typing is a model-level convenience. So these two actions take
+ * strings, and hand them to the originals. No microflow-typed argument is ever
+ * written from MDL, and the registration flow stays readable in MDL where the
+ * tool list belongs.
+ *
+ * Delete this bridge if mxcli learns to emit MicroflowParameterValue.
+ */
+
+/**
+ * Creates the MCP server, taking the authentication microflow as a plain string.
+ *
+ * @param $Path root path the server is served under, e.g. 'memory'
+ * @param $ServerName server name reported to clients ('mcp' and 'sse' are reserved)
+ * @param $Version server version reported to clients
+ * @param $ProtocolVersion MCP protocol version enum name, e.g. 'v2025_03_26'
+ * @param $AuthenticationMicroflow qualified name of the authorization microflow
+ * @returns the created server, to pass to JA_McpServer_AddTool
+ */
+create java action MxcliChatCore.JA_McpServer_Create (
+  Path: string not null,
+  ServerName: string not null,
+  Version: string not null,
+  ProtocolVersion: string not null,
+  AuthenticationMicroflow: string not null
+) returns MCPServer.McpServer
+exposed as 'Create MCP Server (string args)' in 'MxcliChat'
+as $$
+// The original action's Java constructor takes the microflow as a String, so the
+// model-level Microflow parameter type is bypassed entirely.
+return new mcpserver.actions.CreateMCPServer(
+        getContext(),
+        Path,
+        ServerName,
+        Version,
+        ProtocolVersion,
+        AuthenticationMicroflow
+).executeAction();
+$$;
+/
+
+/**
+ * Registers one tool on an MCP server, taking the microflow as a plain string.
+ *
+ * Schema is left null on purpose: AddTool derives the tool's JSON schema from
+ * the executing microflow's parameters when none is supplied.
+ *
+ * @param $McpServerObject the server returned by JA_McpServer_Create
+ * @param $ToolName tool name as the model will see it (no spaces)
+ * @param $Description what the tool does — this is the model's only guidance
+ * @param $ExecutingMicroflow qualified name of the microflow to run
+ * @returns true once the tool is registered
+ */
+create java action MxcliChatCore.JA_McpServer_AddTool (
+  McpServerObject: MCPServer.McpServer not null,
+  ToolName: string not null,
+  Description: string not null,
+  ExecutingMicroflow: string not null
+) returns boolean
+exposed as 'Add MCP Tool (string args)' in 'MxcliChat'
+as $$
+new mcpserver.actions.AddTool(
+        getContext(),
+        McpServerObject.getMendixObject(),
+        ToolName,
+        Description,
+        ExecutingMicroflow,
+        null
+).executeAction();
+return true;
+$$;
+/
+
+/**
+ * Registers the memory MCP server and its four tools.
+ *
+ * Called at startup. The server is reachable at <app url>/memory/mcp; each
+ * tool's JSON schema is derived from its executing microflow's parameters.
+ *
+ * @returns true once the server is registered
+ */
+create or modify microflow MxcliChatCore.SUB_McpServer_Register ()
+returns boolean as $Registered
+folder 'MCP Server'
+begin
+  $Server = call java action MxcliChatCore.JA_McpServer_Create (
+    Path = 'memory',
+    ServerName = 'mxclichat-memory',
+    Version = '1.0.0',
+    ProtocolVersion = 'v2025_03_26',
+    AuthenticationMicroflow = 'MxcliChatCore.SUB_Mcp_Authorize'
+  );
+
+  $ToolSearch = call java action MxcliChatCore.JA_McpServer_AddTool (
+    McpServerObject = $Server,
+    ToolName = 'memory_search',
+    Description = 'Search remembered facts, preferences and instructions by phrase. Returns matching memories with their numbers.',
+    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Search'
+  );
+
+  $ToolList = call java action MxcliChatCore.JA_McpServer_AddTool (
+    McpServerObject = $Server,
+    ToolName = 'memory_list',
+    Description = 'List everything currently remembered, newest first.',
+    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_List'
+  );
+
+  $ToolAdd = call java action MxcliChatCore.JA_McpServer_AddTool (
+    McpServerObject = $Server,
+    ToolName = 'memory_add',
+    Description = 'Remember one thing. Kind is fact, preference or instruction.',
+    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Add'
+  );
+
+  $ToolForget = call java action MxcliChatCore.JA_McpServer_AddTool (
+    McpServerObject = $Server,
+    ToolName = 'memory_forget',
+    Description = 'Forget one memory, by the number that memory_search and memory_list report.',
+    ExecutingMicroflow = 'MxcliChatCore.MCP_Memory_Forget'
+  );
+
+  return true;
+end;
+/

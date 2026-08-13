@@ -1,0 +1,107 @@
+/**
+ * Version B's call to the model.
+ *
+ * Version A's equivalent is one activity: GenAI Commons hands the request to the
+ * OpenAI Connector and gets a response object back. Here the app owns the whole
+ * round trip — build the body, POST it, reshape the answer, import it.
+ */
+
+/**
+ * The API's response -> the shape the import mapping wants.
+ *
+ * Two levels disappear here, and both would otherwise have cost an entity:
+ *   - `choices[].message` is lifted into the choice;
+ *   - `tool_calls[].function` is flattened into the tool call.
+ *
+ * The empty case emits `[]` explicitly. `fallback(.message.tool_calls, [])` does
+ * not: JSLT's fallback treats an empty array as empty and falls through to null,
+ * Mendix's JSLT then keeps the null-valued key, and the importer cannot descend a
+ * null where it expects an array — it fails with
+ *   java.util.NoSuchElementException: key not found: Path(QName(None,),None,)
+ * which names neither the mapping element nor the key that was null (FINDINGS 54).
+ *
+ * `arguments` is left exactly as it arrives. The API sends the model's arguments
+ * as an escaped JSON *string*, so this is the one piece of arbitrary JSON in the
+ * exchange that needs no transformer at all.
+ */
+create data transformer MxcliChatRest.TRF_ChatCompletion
+  source json '{"id":"chatcmpl-1","model":"openai/gpt-oss-20b:free","choices":[{"index":0,"finish_reason":"tool_calls","message":{"role":"assistant","content":"Hello.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"memory_search","arguments":"{}"}}]}}]}'
+{
+  JSLT $$
+{
+  "completion_id": .id,
+  "model": .model,
+  "choices": [for (.choices)
+    {
+      "index": .index,
+      "finish_reason": .finish_reason,
+      "role": .message.role,
+      "content": .message.content,
+      "tool_calls": if (.message.tool_calls)
+        [for (.message.tool_calls)
+          {
+            "call_id": .id,
+            "name": .function.name,
+            "arguments": .function.arguments
+          }
+        ]
+      else []
+    }
+  ]
+}
+  $$;
+};
+/
+
+/**
+ * POSTs one chat completion and returns the parsed response.
+ *
+ * The API key is a constant with an empty default — it is set on the running app
+ * over the M2EE admin port, never committed.
+ *
+ * Note this cannot succeed in the provisioning container: the Mendix runtime's
+ * REST client ignores the environment's egress proxy and cannot resolve
+ * openrouter.ai (FINDINGS 44). Version A fails at exactly the same hop, which is
+ * the point — the failure is environmental, and identical for both versions.
+ *
+ * @param $RequestRoot the request, with its messages and tools attached
+ * @returns the parsed completion, or empty if the call failed
+ */
+create microflow MxcliChatRest.SUB_OpenRouter_Complete (
+  $RequestRoot: MxcliChatRest.RequestRoot
+)
+returns MxcliChatRest.CompletionResponse as $Response
+folder 'Wire'
+begin
+  @position(0, 100)
+  $Body = call microflow MxcliChatRest.SUB_ChatRequest_Build (RequestRoot = $RequestRoot);
+
+  @position(200, 100)
+  declare $Url string = @MxcliChatRest.OpenRouterBaseUrl + '/chat/completions';
+
+  @position(400, 100)
+  $Raw = rest call post '{1}' with ({1} = $Url)
+    header 'Content-Type' = 'application/json'
+    header 'Authorization' = 'Bearer ' + @MxcliChatRest.OpenRouterApiKey
+    body '{1}' with ({1} = $Body)
+    timeout 120
+    returns string;
+
+  -- Logged because the provider's exact response is the only way to see what a
+  -- free model actually returns — the browser shows a generic error dialog.
+  @position(500, 100)
+  log info node 'OpenRouter' 'RAW>>>{1}<<<' with ({1} = $Raw);
+
+  @position(600, 100)
+  $Flat = transform $Raw with MxcliChatRest.TRF_ChatCompletion;
+
+  @position(700, 100)
+  log info node 'OpenRouter' 'FLAT>>>{1}<<<' with ({1} = $Flat);
+
+  @position(800, 100)
+  $Response = import from mapping MxcliChatRest.IMM_ChatCompletion($Flat);
+
+  @position(1000, 100)
+  return $Response;
+end;
+/

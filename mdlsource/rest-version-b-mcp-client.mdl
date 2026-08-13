@@ -1,0 +1,245 @@
+/**
+ * Version B's MCP client, by hand.
+ *
+ * Version A installs the MCP Client module and calls one microflow —
+ * Request_AddAllMCPToolsFromServer — which connects, lists the tools, converts
+ * each one into a GenAI Commons tool and attaches it to the request. This file
+ * is what that microflow does, written out.
+ *
+ * Streamable HTTP, verified against the app's own memory server:
+ *   - the response is SSE-framed (`data: {…}`), even for a single JSON-RPC reply;
+ *   - `initialize` returns the session id in the `Mcp-Session-Id` *header*, so
+ *     the call has to keep the whole HttpResponse rather than just its body;
+ *   - `notifications/initialized` must follow before any tool call.
+ */
+
+/** Where the memory MCP server lives. Same app, so the default is localhost. */
+create or modify constant MxcliChatRest.McpEndpointUrl
+  TYPE String
+  DEFAULT 'http://localhost:8080/memory/mcp'
+  COMMENT 'Streamable-HTTP endpoint of the memory MCP server published by MxcliChatCore.';
+/
+
+/**
+ * The tool result: {"content":[{"type":"text","text":"…"}],"isError":false}.
+ * Only the first text block is kept — the memory tools return exactly one.
+ */
+create or modify data transformer MxcliChatRest.TRF_McpToolResult
+  source json '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"Stored memory #3."}],"isError":false}}'
+{
+  JSLT $$
+{
+  "text": .result.content[0].text,
+  "isError": fallback(.result.isError, false)
+}
+  $$;
+};
+/
+
+create or modify json structure MxcliChatRest.JSON_McpToolResult
+  snippet '{"text":"Stored memory #3.","isError":false}';
+/
+
+create or modify non-persistent entity MxcliChatRest."McpToolResult" (
+  "Text": string,
+  "IsError": boolean
+);
+/
+
+create or modify import mapping MxcliChatRest.IMM_McpToolResult
+  with json structure MxcliChatRest.JSON_McpToolResult
+{
+  create MxcliChatRest.McpToolResult {
+    Text = text,
+    IsError = isError
+  }
+};
+/
+
+/**
+ * Strips the SSE framing so the payload can be parsed as JSON.
+ *
+ * The server answers `data: {…}` with a trailing blank line, which is not JSON
+ * and which no transformer can read — JSLT parses JSON, it does not de-frame a
+ * stream. So this runs first, on the raw string.
+ *
+ * @param $Raw the raw response body
+ * @returns the JSON payload
+ */
+create or modify microflow MxcliChatRest.SUB_Mcp_StripSse (
+  $Raw: string
+)
+returns string as $Json
+folder 'MCP'
+begin
+  @position(0, 100)
+  declare $Json string = trim(replaceAll($Raw, '(?m)^(event|id|retry):.*$', ''));
+  @position(200, 100)
+  set $Json = trim(replaceAll($Json, '(?m)^data: ?', ''));
+  @position(400, 100)
+  return $Json;
+end;
+/
+
+/**
+ * Opens a session: initialize, then notifications/initialized.
+ *
+ * The session id arrives as a response header, so this keeps the HttpResponse
+ * object and walks its headers. Everything the MCP Client module does in one
+ * activity, version A never sees.
+ *
+ * @returns the Mcp-Session-Id, or empty if the server did not open a session
+ */
+create or modify microflow MxcliChatRest.SUB_Mcp_Initialize ()
+returns string as $SessionId
+folder 'MCP'
+begin
+  @position(0, 100)
+  declare $SessionId string = '';
+
+  -- Both the URL and the body of a REST call activity are *templates*, and a
+  -- bare expression in either position is stored as literal text — the runtime
+  -- then POSTs to the string "@MxcliChatRest.McpEndpointUrl" and fails with
+  -- org.apache.http.ProtocolException: Target host is not specified. The
+  -- parameterised form is the only one that evaluates (FINDINGS 53). It is also
+  -- why a JSON body cannot be a literal: `{` opens a placeholder (CE0712).
+  @position(200, 100)
+  declare $InitBody string = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"MxcliChatRest","version":"1.0.0"}}}';
+
+  @position(400, 100)
+  $Response = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
+    header 'Content-Type' = 'application/json'
+    header 'Accept' = 'application/json, text/event-stream'
+    body '{1}' with ({1} = $InitBody)
+    timeout 60
+    returns response;
+
+  @position(400, 100)
+  retrieve $Headers from $Response/System.HttpHeaders;
+
+  @position(600, 100)
+  loop $Header in $Headers
+  begin
+    @position(700, 200)
+    if toLowerCase($Header/Key) = 'mcp-session-id' then
+      @position(800, 300)
+      set $SessionId = $Header/Value;
+    end if;
+  end loop;
+
+  @position(1000, 100)
+  declare $AckBody string = '{"jsonrpc":"2.0","method":"notifications/initialized"}';
+
+  @position(1050, 100)
+  if $SessionId != '' then
+    @position(1100, 200)
+    $Ack = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
+      header 'Content-Type' = 'application/json'
+      header 'Accept' = 'application/json, text/event-stream'
+      header 'Mcp-Session-Id' = $SessionId
+      body '{1}' with ({1} = $AckBody)
+      timeout 60
+      returns string;
+  end if;
+
+  @position(1300, 100)
+  return $SessionId;
+end;
+/
+
+/**
+ * Lists the server's tools.
+ *
+ * The tool schemas are why this app needed a transformer at all: the memory
+ * server's own `MaxResults` is `{"anyOf":[{"type":"number"},{"type":"string"}]}`,
+ * which no JSON structure could ever describe. TRF_McpToolList collapses each
+ * inputSchema to a string with to-json() and the import mapping stores it
+ * verbatim, ready to hand back to TRF_ChatRequest.
+ *
+ * @param $SessionId the session opened by SUB_Mcp_Initialize
+ * @returns the tool list
+ */
+create or modify microflow MxcliChatRest.SUB_Mcp_ListTools (
+  $SessionId: string
+)
+returns MxcliChatRest.McpToolList as $ToolList
+folder 'MCP'
+begin
+  @position(0, 100)
+  declare $ListBody string = '{"jsonrpc":"2.0","id":2,"method":"tools/list"}';
+
+  @position(100, 100)
+  $Raw = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
+    header 'Content-Type' = 'application/json'
+    header 'Accept' = 'application/json, text/event-stream'
+    header 'Mcp-Session-Id' = $SessionId
+    body '{1}' with ({1} = $ListBody)
+    timeout 60
+    returns string;
+
+  @position(200, 100)
+  $Json = call microflow MxcliChatRest.SUB_Mcp_StripSse (Raw = $Raw);
+
+  @position(400, 100)
+  $Flat = transform $Json with MxcliChatRest.TRF_McpToolList;
+
+  @position(600, 100)
+  $ToolList = import from mapping MxcliChatRest.IMM_McpToolList($Flat);
+
+  @position(800, 100)
+  return $ToolList;
+end;
+/
+
+/**
+ * Calls one tool.
+ *
+ * `$ArgumentsJson` is concatenated into the request rather than mapped. This is
+ * the one place a transformer does not help: the arguments come from the model
+ * as an opaque string and there is no object model to export from, so there is
+ * nothing for a mapping to walk. String concatenation is the honest answer here
+ * — and it is also what makes the tool loop's inputs worth validating, since a
+ * malformed `arguments` string produces a malformed JSON-RPC request.
+ *
+ * @param $SessionId the session opened by SUB_Mcp_Initialize
+ * @param $ToolName the tool to call
+ * @param $ArgumentsJson the model's arguments, as a JSON object string
+ * @returns the tool's text result
+ */
+create or modify microflow MxcliChatRest.SUB_Mcp_CallTool (
+  $SessionId: string,
+  $ToolName: string,
+  $ArgumentsJson: string
+)
+returns MxcliChatRest.McpToolResult as $Result
+folder 'MCP'
+begin
+  @position(0, 100)
+  declare $Arguments string = if $ArgumentsJson = '' then '{}' else $ArgumentsJson;
+
+  @position(200, 100)
+  declare $Body string = '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"'
+    + $ToolName + '","arguments":' + $Arguments + '}}';
+
+  @position(400, 100)
+  $Raw = rest call post '{1}' with ({1} = @MxcliChatRest.McpEndpointUrl)
+    header 'Content-Type' = 'application/json'
+    header 'Accept' = 'application/json, text/event-stream'
+    header 'Mcp-Session-Id' = $SessionId
+    body '{1}' with ({1} = $Body)
+    timeout 60
+    returns string;
+
+  @position(600, 100)
+  $Json = call microflow MxcliChatRest.SUB_Mcp_StripSse (Raw = $Raw);
+
+  @position(800, 100)
+  $Flat = transform $Json with MxcliChatRest.TRF_McpToolResult;
+
+  @position(1000, 100)
+  $Result = import from mapping MxcliChatRest.IMM_McpToolResult($Flat);
+
+  @position(1200, 100)
+  return $Result;
+end;
+/

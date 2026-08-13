@@ -1,0 +1,26 @@
+{
+  "manifest-version": "1.0.0",
+  "package": {
+    "package-id": "4d54e3ca-16c2-50f1-93dc-3ece848571c8",
+    "name": "MCPServer",
+    "version": "5.1.0",
+    "type": "Module",
+    "checksum": "{SHA256}1uPE869LnWO4cYCdAl6A35LpSIbyXHAcISXahqkvQjw="
+  },
+  "model-version": "11.12.1",
+  "files": [
+    "javasource/mcpserver/actions/AddPrompt.java",
+    "javasource/mcpserver/actions/AddTool.java",
+    "javasource/mcpserver/actions/CreateMCPServer.java",
+    "javasource/mcpserver/impl/McpServerRegistry.java",
+    "javasource/mcpserver/impl/McpServerRequestHandler.java",
+    "javasource/mcpserver/impl/McpSessionManager.java",
+    "javasource/mcpserver/impl/McpTransportHandler.java",
+    "javasource/mcpserver/impl/MxLogger.java",
+    "themesource/mcpserver/native/design-properties.json",
+    "themesource/mcpserver/native/main.js",
+    "themesource/mcpserver/settings.json",
+    "themesource/mcpserver/web/design-properties.json",
+    "themesource/mcpserver/web/main.scss"
+  ]
+}
